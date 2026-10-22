@@ -408,6 +408,15 @@ void CSAIdleHook::RenderForwardAfterDeferred()
     g_pCustomBuildingDNPipe->RenderAlphaList();
     renderer->EndDebugEvent();
 
+    // Smashed objects (e.g. a knocked-over lamppost): the game's break manager draws their pieces in immediate mode,
+    // whose forward shader only writes colour. In the G-buffer pass that left the pieces with the normals and depth of
+    // whatever was behind them, so they came out pale and see-through; here they are drawn over the lit scene.
+    DefinedState();
+    renderer->BeginDebugEvent( L"Broken objects rendering pass" );
+    BreakManager_c__Render( g_breakMan, 0 );
+    BreakManager_c__Render( g_breakMan, 1 );
+    renderer->EndDebugEvent();
+
     //CPostEffects__m_bDisableAllPostEffect = true;
     // Render effects and 2d stuff
     DefinedState();
@@ -429,9 +438,7 @@ void CSAIdleHook::RenderDeferred()
     CRendererRH::RenderRoads();
     CRendererRH::RenderEverythingBarRoads();
     CVisibilityPlugins::RenderFadingUnderwaterEntities();
-    BreakManager_c__Render( g_breakMan, 0 );
     CVisibilityPlugins::RenderFadingEntities();
-    BreakManager_c__Render( g_breakMan, 1 );
     // CRenderer::RenderFadingInUnderwaterEntities
     CVisibilityPluginsRH::RenderWeaponPedsNoMuzzleFlash();
     //CRenderer::RenderTOBJs();
