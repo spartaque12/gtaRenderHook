@@ -266,8 +266,10 @@ void CSAIdleHook::RenderInGame()
     scanTimer.Stop();
 
     FrameProfiler::BeginZone( FrameProfiler::ZonePreRender );
+    // The game's PreRender already runs PreRender for every visible entity, LOD and off-screen entity with effects.
+    // CRendererRH::PreRender walks the same visible lists again, so each entity was pre-rendered twice per frame:
+    // lamps and traffic lights added every point light twice (double brightness, half the light slots).
     CRenderer::PreRender();
-    CRendererRH::PreRender();
     CWorld::ProcessPedsAfterPreRender();
     FrameProfiler::EndZone( FrameProfiler::ZonePreRender );
 
