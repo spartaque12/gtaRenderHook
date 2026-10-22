@@ -33,9 +33,18 @@ public:
     void CalculateShadowDistances( RwReal fNear, RwReal fFar );
     void QueueTextureReload();
     void DrawDebug();
+    /*!
+        Chooses the cascades to re-render this frame (FarCascadeUpdateInterval). Every cascade is re-rendered when
+        there were no shadows last frame (m_bShadowHistoryValid) or the light direction changed.
+    */
+    void SelectCascadesToUpdate( const RW::V3d &lightDir );
+    bool IsCascadeUpdated( int cascade ) const { return m_bCascadeUpdated[cascade]; }
+    bool AllCascadesUpdated() const;
     RwCamera* m_pShadowCamera = nullptr;
     float     m_fShadowDistances[5]{};
     bool	m_bShadowsRendered = false;
+    // shadows were rendered last frame, so cascades kept from it are still valid
+    bool	m_bShadowHistoryValid = false;
     bool	m_bRequiresReloading = false;
     /*!
         Light aligned bounding box for each shadow cascade
@@ -46,6 +55,12 @@ public:
     static RW::Matrix m_InvLightSpaceMatrix[4];
     static RW::V3d m_vFrustumCorners[4][8];
 private:
+    void ClearCascade( int cascade );
+    bool    m_bCascadeUpdated[4]{ true, true, true, true };
+    bool    m_bForceFullUpdate = true;
+    UINT    m_uiFrame = 0;
+    RW::V3d m_vLastLightDir{ 0, 0, 0 };
+    class CD3D1XShader* m_pDepthClearPS = nullptr;
     RwMatrix* m_pLightViewProj;
     CD3D1XConstantBuffer<CBShadows>* m_pLightCB;
 };
@@ -67,6 +82,8 @@ public:
         m_aFields["SplitLambda"] = new FloatSField( "SplitLambda", false, false, false, m_sName, 0.0f, 0.0f, 1.0f, 0.01f );
         // where shadows end with SplitLambda, in metres (limited by MaxDrawDistance)
         m_aFields["ShadowDistance"] = new FloatSField( "ShadowDistance", false, false, false, m_sName, 450.0f, 10.0f, 30000.0f, 5.0f );
+        // cascades from the third on are re-rendered every this many frames, staggered (1 = every frame)
+        m_aFields["FarCascadeUpdateInterval"] = new UIntSField( "FarCascadeUpdateInterval", false, false, false, m_sName, 1, 1, 8, 1 );
         Reset();
     }
     tinyxml2::XMLElement* Save( tinyxml2::XMLDocument* doc );
