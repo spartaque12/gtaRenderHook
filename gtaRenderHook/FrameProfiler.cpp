@@ -11,17 +11,134 @@
 #include <cstdarg>
 #include <cstdio>
 #include <vector>
+#include <intrin.h>
 
 #pragma comment( lib, "psapi.lib" )
 
 extern int drawCallCount;
+
+// ------------------------------------------------------------------------------------------------ CGame::Process calls
+// Each call CGame::Process (0x53BEE0, 1.0 US) makes is redirected through a 10-byte stub (push site index; jmp
+// ProfSiteEnter) that swaps the return address for ProfSiteExit, so the callee's time is measured whatever its calling
+// convention or arguments. Installed on the first frame, after other plugins have placed their own hooks there: a
+// plugin's hook is then timed as part of the call it hooks.
+namespace
+{
+struct ProfSite
+{
+    uintptr_t at, original;  // call instruction, target in the unmodified game
+    const char *name;
+    uintptr_t target;        // what the call pointed to when the stub was installed
+    char label[96];
+};
+ProfSite g_profSites[] = {
+    { 0x53BEE6, 0x541DD0, "CPad::UpdatePads" }, { 0x53BEF0, 0x53D030, "CLoadMonitor::BeginFrame" },
+    { 0x53BF0B, 0x40E670, "CStreaming::Update" }, { 0x53BF28, 0x4D5D00, "CCutsceneMgr::Update" },
+    { 0x53BF44, 0x57B440, "sub_57B440 (menu system)" }, { 0x53BF49, 0x572D10, "sub_572D10" },
+    { 0x53BF4E, 0x6997E0, "sub_6997E0" }, { 0x53BF7D, 0x5083C0, "sub_5083C0 (audio)" },
+    { 0x53BFA9, 0x727260, "sub_727260" }, { 0x53BFAE, 0x727350, "sub_727350" }, { 0x53BFB3, 0x719800, "sub_719800" },
+    { 0x53BFB8, 0x439AF0, "sub_439AF0 (cheats)" }, { 0x53BFBD, 0x52CF10, "CClock::Update" },
+    { 0x53BFC2, 0x72B850, "CWeather::Update" }, { 0x53BFC7, 0x46A000, "CTheScripts::Process" },
+    { 0x53BFCC, 0x411E20, "CCollision::Update" }, { 0x53BFD8, 0x450A60, "sub_450A60" },
+    { 0x53BFDD, 0x6F5900, "CTrain::UpdateTrains" }, { 0x53BFE2, 0x6C79A0, "CHeli::UpdateHelis" },
+    { 0x53BFE7, 0x43DAC0, "CDarkel::Update" }, { 0x53BFEC, 0x7205C0, "CSkidmarks::Update" },
+    { 0x53BFF1, 0x71B0D0, "CGlass::Update" }, { 0x53BFF6, 0x562360, "CWanted::UpdateEachFrame" },
+    { 0x53BFFB, 0x539CE0, "CCreepingFire::Update" }, { 0x53C000, 0x49AA00, "CSetPieces::Update" },
+    { 0x53C00A, 0x53AF00, "CFireManager::Update" }, { 0x53C030, 0x616650, "CPopulation::Update (1)" },
+    { 0x53C054, 0x616650, "CPopulation::Update (2)" }, { 0x53C05C, 0x73A360, "CWeapon::UpdateWeapons" },
+    { 0x53C06A, 0x6F3F40, "CTheCarGenerators::Process" }, { 0x53C077, 0x6F3FE0, "sub_6F3FE0 (cranes)" },
+    { 0x53C07C, 0x712FF0, "CClouds::Update" }, { 0x53C081, 0x7185B0, "CMovingThings::Update" },
+    { 0x53C086, 0x72A3C0, "CWaterCannons::Update" }, { 0x53C08B, 0x5720A0, "CUserDisplay::Process" },
+    { 0x53C090, 0x460500, "CReplay::Update" }, { 0x53C095, 0x5684A0, "CWorld::Process" },
+    { 0x53C09F, 0x53D0B0, "CLoadMonitor::EndFrame" }, { 0x53C0AD, 0x458DE0, "CPickups::Update" },
+    { 0x53C0B2, 0x423F10, "CCarCtrl::PruneVehiclesOfInterest" }, { 0x53C0B7, 0x44C8C0, "CGarages::Update" },
+    { 0x53C0BC, 0x440D10, "CEntryExitManager::Update" }, { 0x53C0C1, 0x49C490, "CStuntJumpManager::Update" },
+    { 0x53C0C6, 0x712330, "CBirds::Update" }, { 0x53C0CB, 0x726AA0, "CSpecialFX::Update" },
+    { 0x53C0D0, 0x558D70, "CRopes::Update" }, { 0x53C0D5, 0x7046A0, "sub_7046A0 (post effects)" },
+    { 0x53C0DA, 0x561760, "CTimeCycle::Update" }, { 0x53C0DF, 0x610BF0, "CPopCycle::Update" },
+    { 0x53C0F1, 0x605A30, "sub_605A30" }, { 0x53C0F6, 0x45C440, "sub_45C440" }, { 0x53C104, 0x52B730, "sub_52B730" },
+    { 0x53C10B, 0x50B5D0, "sub_50B5D0" }, { 0x53C110, 0x72DEC0, "sub_72DEC0" },
+    { 0x53C11D, 0x442AD0, "sub_442AD0" }, { 0x53C122, 0x446610, "CGangWars::Update" },
+    { 0x53C127, 0x43C590, "CConversations::Update" }, { 0x53C12C, 0x43B0F0, "CPedToPlayerConversations::Update" },
+    { 0x53C131, 0x41BC80, "CBridge::Update" }, { 0x53C136, 0x6FC5A0, "sub_6FC5A0" }, { 0x53C13B, 0x6FADF0, "sub_6FADF0" },
+    { 0x53C140, 0x70C950, "CShadows::UpdatePermanentShadows" }, { 0x53C159, 0x5DCFA0, "CPlantMgr::Update" },
+    { 0x53C15E, 0x5D8050, "sub_5D8050" }, { 0x53C18F, 0x710B50, "sub_710B50" },
+};
+const int kProfSiteCount = sizeof( g_profSites ) / sizeof( g_profSites[0] );
+
+struct ProfSiteCall
+{
+    int       site;
+    uintptr_t ret;
+    int64_t   start;
+};
+ProfSiteCall g_profSiteStack[64];
+int          g_profSiteDepth;
+double *     g_profSiteMs;   // per-site times of the frame being recorded
+} // namespace
+
+extern "C" uintptr_t __cdecl ProfSiteEnterC( uintptr_t ret, int site )
+{
+    LARGE_INTEGER t;
+    QueryPerformanceCounter( &t );
+    if ( g_profSiteDepth < 64 )
+        g_profSiteStack[g_profSiteDepth] = { site, ret, t.QuadPart };
+    ++g_profSiteDepth;
+    return g_profSites[site].target;
+}
+
+extern "C" uintptr_t __cdecl ProfSiteLeaveC()
+{
+    LARGE_INTEGER t;
+    QueryPerformanceCounter( &t );
+    --g_profSiteDepth;
+    const ProfSiteCall &c = g_profSiteStack[g_profSiteDepth < 64 ? g_profSiteDepth : 63];
+    static LARGE_INTEGER freq;
+    if ( !freq.QuadPart )
+        QueryPerformanceFrequency( &freq );
+    if ( g_profSiteMs )
+        g_profSiteMs[c.site] += 1000.0 * double( t.QuadPart - c.start ) / double( freq.QuadPart );
+    return c.ret;
+}
+
+// [esp] = site index, [esp+4] = return address into CGame::Process.
+static __declspec( naked ) void ProfSiteExit()
+{
+    __asm {
+        push 0              // becomes the original return address
+        pushad
+        pushfd
+        call ProfSiteLeaveC
+        mov [esp+36], eax
+        popfd
+        popad
+        ret
+    }
+}
+
+static __declspec( naked ) void ProfSiteEnter()
+{
+    __asm {
+        pushad
+        pushfd
+        push dword ptr [esp+36]     // site index
+        push dword ptr [esp+44]     // return address
+        call ProfSiteEnterC
+        add esp, 8
+        mov [esp+36], eax           // site index slot -> target, 'ret' below jumps there
+        mov dword ptr [esp+40], offset ProfSiteExit
+        popfd
+        popad
+        ret
+    }
+}
 
 namespace FrameProfiler
 {
 namespace
 {
 const char *const kZoneNames[ZoneCount] = {
-    "idle total", "time", "game logic", "audio", "lights", "reload checks", "render total", "prepare", "sky/clouds",
+    "frame", "time", "game logic", "audio", "lights", "reload checks", "render total", "prepare", "sky/clouds",
     "shadow prepare", "render list", "pre-render", "cubemap", "shadows", "g-buffer", "deferred", "forward/alpha",
     "tonemap", "2D/HUD", "settings GUI", "HUD", "present" };
 // Zones that also get GPU timestamps (rendering work).
@@ -54,6 +171,8 @@ struct FrameRecord
     uint32_t   streamingKB, modelsRequested;
     int32_t    streamingDeltaKB;
     uint32_t   pageFaults;
+    double     onCpuPct;                 // share of the frame the main thread was running on a CPU core
+    double     siteMs[kProfSiteCount];   // CGame::Process calls
 };
 
 // GPU timestamps are read back kSlots - 1 frames later, so each slot keeps its frame's record until then.
@@ -83,6 +202,9 @@ int64_t              g_zoneStart[ZoneCount];
 int                  g_zoneDepth[ZoneCount];
 uint32_t             g_lastStreamingKB;
 uint32_t             g_lastPageFaults;
+ULONG64              g_lastThreadCycles;
+uint64_t             g_tsc0;
+int64_t              g_qpc0;
 ID3D11Device *       g_device;
 ID3D11DeviceContext *g_context;
 IDXGIAdapter3 *      g_adapter;
@@ -98,6 +220,7 @@ struct Summary
     double              eventMs[EventCount], eventMax[EventCount];
     uint64_t            draws, uploadBytes;
     uint32_t            slowFrames;
+    double              siteSum[kProfSiteCount], siteMax[kProfSiteCount];
 } g_summary;
 
 int64_t Now()
@@ -136,6 +259,22 @@ struct Line
         len = r < 0 ? int( strlen( buf ) ) : len + r;
     }
 };
+
+// Names the biggest CGame::Process calls of a frame (or averages), largest first.
+void SiteLine( Line &line, const double *ms, double scale, const double *maxMs, int top, double minMs )
+{
+    int order[kProfSiteCount];
+    for ( int i = 0; i < kProfSiteCount; ++i )
+        order[i] = i;
+    std::sort( order, order + kProfSiteCount, [ms]( int a, int b ) { return ms[a] > ms[b]; } );
+    for ( int i = 0; i < top && ms[order[i]] * scale >= minMs; ++i )
+    {
+        if ( maxMs )
+            line.Add( " %s %.2f/%.1f |", g_profSites[order[i]].label, ms[order[i]] * scale, maxMs[order[i]] );
+        else
+            line.Add( " %s %.2f |", g_profSites[order[i]].label, ms[order[i]] * scale );
+    }
+}
 
 void InitGpu()
 {
@@ -189,10 +328,14 @@ void StartFrame()
     FrameRecord &r = slot.record;
     memset( &r, 0, sizeof r );
     r.index = g_frameIndex;
+    g_profSiteMs = r.siteMs;
     memset( slot.used, 0, sizeof slot.used );
-    memset( g_zoneDepth, 0, sizeof g_zoneDepth );
     if ( g_gpuTimers && !g_gpuFailed && slot.disjoint )
+    {
         g_context->Begin( slot.disjoint );
+        slot.used[ZoneFrame] = true;   // ends when Present starts
+        g_context->End( slot.begin[ZoneFrame] );
+    }
     drawCallCount = 0;
 }
 
@@ -214,26 +357,45 @@ void MemoryLine( Line &line )
     }
 }
 
+// Frame time not inside any top-level zone: other plugins' code in the game loop, Windows messages, end-of-frame work.
+double Untimed( const FrameRecord &r )
+{
+    static const Zone top[] = { ZoneTimeUpdate, ZoneGameUpdate, ZoneAudio, ZoneLightUpdate, ZoneReloads, ZoneRenderInGame,
+                                ZoneGUI, ZoneHUD, ZonePresent };
+    double timed = 0;
+    for ( Zone z : top )
+        timed += r.cpuMs[z];
+    return max( 0.0, r.frameMs - timed );
+}
+
 void LogFrame( const FrameRecord &r )
 {
     char gpuTotal[32] = "unknown";
     if ( r.gpuValid )
-        sprintf_s( gpuTotal, "%.1f ms", r.gpuMs[ZoneIdle] );
+        sprintf_s( gpuTotal, "%.1f ms", r.gpuMs[ZoneFrame] );
     Log( "SLOW frame %llu at %02d:%02d:%02d.%03d: %.1f ms | GPU work %s", r.index, r.time.wHour, r.time.wMinute,
          r.time.wSecond, r.time.wMilliseconds, r.frameMs, gpuTotal );
     Line cpu;
     cpu.Add( "  CPU ms:" );
     for ( int z = 0; z < ZoneCount; ++z )
-        if ( z != ZoneIdle && z != ZoneRenderInGame && r.cpuMs[z] >= 0.05 )
+        if ( z != ZoneFrame && z != ZoneRenderInGame && r.cpuMs[z] >= 0.05 )
             cpu.Add( " %s %.2f |", kZoneNames[z], r.cpuMs[z] );
-    cpu.Add( " outside RenderHook %.2f", max( 0.0, r.frameMs - r.cpuMs[ZoneIdle] - r.cpuMs[ZonePresent] ) );
+    cpu.Add( " untimed %.2f | main thread on CPU %.0f%% of the frame", Untimed( r ), r.onCpuPct );
     Log( "%s", cpu.buf );
+    Line gl;
+    gl.Add( "  game logic calls ms:" );
+    double inCalls = 0;
+    for ( double v : r.siteMs )
+        inCalls += v;
+    SiteLine( gl, r.siteMs, 1.0, nullptr, 6, 0.1 );
+    gl.Add( " not in these calls (plugin hooks around CGame::Process) %.2f", max( 0.0, r.cpuMs[ZoneGameUpdate] - inCalls ) );
+    Log( "%s", gl.buf );
     if ( r.gpuValid )
     {
         Line gpu;
         gpu.Add( "  GPU ms:" );
         for ( int z = 0; z < ZoneCount; ++z )
-            if ( kGpuZone[z] && z != ZoneIdle && z != ZoneRenderInGame && r.gpuMs[z] >= 0.05 )
+            if ( kGpuZone[z] && z != ZoneFrame && z != ZoneRenderInGame && r.gpuMs[z] >= 0.05 )
                 gpu.Add( " %s %.2f |", kZoneNames[z], r.gpuMs[z] );
         Log( "%s", gpu.buf );
     }
@@ -288,18 +450,22 @@ void LogSummary( int64_t now )
     Line cpu;
     cpu.Add( "  CPU avg/max ms:" );
     for ( int z = 0; z < ZoneCount; ++z )
-        if ( z != ZoneIdle && z != ZoneRenderInGame && s.cpuMax[z] >= 0.05 )
+        if ( z != ZoneFrame && z != ZoneRenderInGame && s.cpuMax[z] >= 0.05 )
             cpu.Add( " %s %.2f/%.1f |", kZoneNames[z], s.cpuSum[z] / n, s.cpuMax[z] );
     Log( "%s", cpu.buf );
     if ( s.gpuFrames )
     {
         Line gpu;
-        gpu.Add( "  GPU avg/max ms: total %.2f/%.1f |", s.gpuSum[ZoneIdle] / s.gpuFrames, s.gpuMax[ZoneIdle] );
+        gpu.Add( "  GPU avg/max ms: total %.2f/%.1f |", s.gpuSum[ZoneFrame] / s.gpuFrames, s.gpuMax[ZoneFrame] );
         for ( int z = 0; z < ZoneCount; ++z )
-            if ( kGpuZone[z] && z != ZoneIdle && z != ZoneRenderInGame && s.gpuMax[z] >= 0.05 )
+            if ( kGpuZone[z] && z != ZoneFrame && z != ZoneRenderInGame && s.gpuMax[z] >= 0.05 )
                 gpu.Add( " %s %.2f/%.1f |", kZoneNames[z], s.gpuSum[z] / s.gpuFrames, s.gpuMax[z] );
         Log( "%s", gpu.buf );
     }
+    Line gl;
+    gl.Add( "  game logic calls avg/max ms:" );
+    SiteLine( gl, s.siteSum, 1.0 / n, s.siteMax, 10, 0.05 );
+    Log( "%s", gl.buf );
     Line ev;
     ev.Add( "  events (count, total ms, longest ms):" );
     for ( int e = 0; e < EventCount; ++e )
@@ -345,6 +511,11 @@ void Finalize( Slot &slot )
     }
     s.draws += r.draws;
     s.uploadBytes += r.uploadBytes;
+    for ( int i = 0; i < kProfSiteCount; ++i )
+    {
+        s.siteSum[i] += r.siteMs[i];
+        s.siteMax[i] = max( s.siteMax[i], r.siteMs[i] );
+    }
     if ( r.frameMs > g_slowMs )
     {
         ++s.slowFrames;
@@ -397,6 +568,53 @@ void Resolve( bool force )
 
 bool Enabled() { return g_enabled; }
 
+void InstallGameProcessHooks()
+{
+    auto *stubs = static_cast<uint8_t *>( VirtualAlloc( nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE ) );
+    if ( !stubs )
+        return;
+    int installed = 0, hooked = 0;
+    for ( int i = 0; i < kProfSiteCount; ++i )
+    {
+        ProfSite &site = g_profSites[i];
+        strcpy_s( site.label, site.name );
+        auto *at = reinterpret_cast<uint8_t *>( site.at );
+        if ( at[0] != 0xE8 )
+        {
+            Log( "CGame::Process call at 0x%X (%s) is not a call any more - not timed", site.at, site.name );
+            continue;
+        }
+        site.target = site.at + 5 + *reinterpret_cast<int32_t *>( at + 1 );
+        if ( site.target != site.original )
+        {
+            HMODULE mod = nullptr;
+            char path[MAX_PATH] = "?";
+            if ( GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                     reinterpret_cast<LPCSTR>( site.target ), &mod ) )
+                GetModuleFileNameA( mod, path, MAX_PATH );
+            const char *base = strrchr( path, '\\' );
+            sprintf_s( site.label, "%s [hooked by %s]", site.name, base ? base + 1 : path );
+            ++hooked;
+        }
+        uint8_t *stub = stubs + i * 16;
+        stub[0] = 0x68;   // push i
+        *reinterpret_cast<int32_t *>( stub + 1 ) = i;
+        stub[5] = 0xE9;   // jmp ProfSiteEnter
+        *reinterpret_cast<int32_t *>( stub + 6 ) =
+            int32_t( reinterpret_cast<uintptr_t>( &ProfSiteEnter ) - reinterpret_cast<uintptr_t>( stub + 10 ) );
+        DWORD prot;
+        VirtualProtect( at + 1, 4, PAGE_EXECUTE_READWRITE, &prot );
+        *reinterpret_cast<int32_t *>( at + 1 ) = int32_t( reinterpret_cast<uintptr_t>( stub ) - ( site.at + 5 ) );
+        VirtualProtect( at + 1, 4, prot, &prot );
+        ++installed;
+    }
+    FlushInstructionCache( GetCurrentProcess(), nullptr, 0 );
+    Log( "timing %d calls made by CGame::Process (%d of them hooked by other plugins)", installed, hooked );
+    for ( const ProfSite &site : g_profSites )
+        if ( site.target && site.target != site.original )
+            Log( "  %s", site.label );
+}
+
 void Init()
 {
     char ini[MAX_PATH];
@@ -418,8 +636,9 @@ void Init()
     g_summary.frameMs.reserve( 4096 );
     Log( "RenderHook frame profiler: slow frame > %.1f ms, summary every %.0f s, GPU timers %s", g_slowMs,
          g_summarySeconds, g_gpuTimers ? "on" : "off" );
-    Log( "Slow frames are logged when their GPU times are read back, a few frames later. 'outside RenderHook' = game loop "
-         "time outside RenderHook's Idle and Present (other plugins' hooks, message pump)." );
+    Log( "Slow frames are logged when their GPU times are read back, a few frames later. 'untimed' = frame time outside "
+         "the timed phases (other plugins' code in the game loop, Windows messages). 'main thread on CPU' below ~90%% "
+         "means it waited (driver, locks) or Windows ran other threads on its core." );
     fflush( g_log );
 }
 
@@ -428,6 +647,8 @@ void BeginZone( Zone zone )
     if ( GetCurrentThreadId() != g_mainThread || g_zoneDepth[zone]++ )
         return;
     g_zoneStart[zone] = Now();
+    if ( zone == ZonePresent && g_gpuReady && g_gpuTimers && !g_gpuFailed && g_slots[g_current].used[ZoneFrame] )
+        g_context->End( g_slots[g_current].end[ZoneFrame] );
     if ( g_gpuReady && g_gpuTimers && !g_gpuFailed && kGpuZone[zone] )
     {
         Slot &slot = g_slots[g_current];
@@ -500,6 +721,10 @@ void EndFrame()
     if ( !g_gpuReady && !g_gpuFailed )
     {
         InitGpu();
+        InstallGameProcessHooks();
+        g_tsc0 = __rdtsc();
+        g_qpc0 = now;
+        QueryThreadCycleTime( GetCurrentThread(), &g_lastThreadCycles );
         g_lastFrameEnd = now;
         g_summary.start = now;
         StartFrame();
@@ -510,6 +735,13 @@ void EndFrame()
     FrameRecord &r = slot.record;
     r.frameMs = Ms( now - g_lastFrameEnd );
     GetLocalTime( &r.time );
+    // QueryThreadCycleTime counts in TSC ticks; the TSC rate is measured against the QPC clock since the first frame.
+    ULONG64 cycles = 0;
+    QueryThreadCycleTime( GetCurrentThread(), &cycles );
+    const double tscPerMs = double( __rdtsc() - g_tsc0 ) / max( 1.0, Ms( now - g_qpc0 ) );
+    if ( tscPerMs > 0 && r.frameMs > 0 )
+        r.onCpuPct = min( 100.0, 100.0 * double( cycles - g_lastThreadCycles ) / ( tscPerMs * r.frameMs ) );
+    g_lastThreadCycles = cycles;
     r.buildingDraws = static_cast<uint32_t>( drawCallCount );
     r.visibleEntities = CRendererRH::ms_nNoOfVisibleEntities;
     r.visibleLods = CRendererRH::ms_nNoOfVisibleLods;

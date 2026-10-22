@@ -14,7 +14,7 @@ namespace FrameProfiler
 {
 enum Zone : int
 {
-    ZoneIdle,           // CSAIdleHook::Idle as a whole
+    ZoneFrame,          // GPU only: all GPU work of the frame up to Present (Present is called inside Idle)
     ZoneTimeUpdate,
     ZoneGameUpdate,     // CGame::Process: game logic, scripts, physics, streaming
     ZoneAudio,
@@ -55,6 +55,7 @@ bool Enabled();
 void Init();                    // reads RHFrameProfiler.ini; called once at startup
 void EndFrame();                // right after Present
 void AddDrawCall();
+void InstallGameProcessHooks();   // times each call made by CGame::Process; done on the first frame
 void AddUploadBytes( uint32_t bytes );
 
 void BeginZone( Zone zone );

@@ -79,7 +79,6 @@ void CSAIdleHook::Patch()
 
 void CSAIdleHook::Idle( void *Data )
 {
-    RH_PROFILE_ZONE( ZoneIdle );
     SettingsHolder::Instance()->InitGUI();
     if ( !gDebugSettings.GetToggleField( "UseIdleHook" ) )
     {
@@ -154,7 +153,6 @@ void CSAIdleHook::Idle( void *Data )
                 { 255,255,255,255 } );
         }
     }
-    RH_PROFILE_ZONE( ZoneHUD );
     RenderHUD();
 }
 
@@ -377,8 +375,11 @@ void CSAIdleHook::RenderHUD()
         DrawMenuManagerFrontEnd( &FrontEndMenuManager ); // CMenuManager::DrawFrontEnd
     g_pRwCustomEngine->RenderStateSet( rwRENDERSTATETEXTURERASTER, NULL );
 
-    DoFade();
-    Render2dStuffAfterFade();
+    {
+        RH_PROFILE_ZONE( ZoneHUD );
+        DoFade();
+        Render2dStuffAfterFade();
+    }
 
     DoRWStuffEndOfFrame();
 }
