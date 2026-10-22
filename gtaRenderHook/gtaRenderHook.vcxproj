@@ -280,6 +280,7 @@
     <ClInclude Include="TemporalAA.h" />
     <ClInclude Include="RenderHookAPI.h" />
     <ClInclude Include="PluginDrawCallback.h" />
+    <ClInclude Include="FrameProfiler.h" />
     <ClInclude Include="VolumetricLighting.h" />
     <ClInclude Include="VoxelOctreeRenderer.h" />
     <ClInclude Include="VoxelPipeline.h" />
@@ -379,6 +380,7 @@
     </ClCompile>
     <ClCompile Include="TemporalAA.cpp" />
     <ClCompile Include="PluginDrawCallback.cpp" />
+    <ClCompile Include="FrameProfiler.cpp" />
     <ClCompile Include="VolumetricLighting.cpp" />
     <ClCompile Include="VoxelOctreeRenderer.cpp" />
     <ClCompile Include="VoxelPipeline.cpp" />

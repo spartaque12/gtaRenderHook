@@ -8,6 +8,7 @@
 #include "D3D1XStateManager.h"
 #include "RwD3D1XEngine.h"
 #include "D3D1XVertexDeclarationManager.h"
+#include "FrameProfiler.h"
 
 CD3D1XIm2DPipeline::CD3D1XIm2DPipeline() :
 #ifndef DebuggingShaders
@@ -79,6 +80,7 @@ void CD3D1XIm2DPipeline::Draw( RwPrimitiveType prim, RwIm2DVertex* verticles, Rw
 
     // draw primitive
     g_pStateMgr->FlushStates();
+    FrameProfiler::AddDrawCall();
     pImmediateContext->Draw( vertCount, 0 );
 }
 

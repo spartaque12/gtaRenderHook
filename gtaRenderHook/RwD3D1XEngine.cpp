@@ -1,6 +1,7 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check it.
 // PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include "stdafx.h"
+#include "FrameProfiler.h"
 #include "RwD3D1XEngine.h"
 #include "D3D1XStateManager.h"
 #include "D3D1X2DTexture.h"
@@ -457,6 +458,8 @@ bool CRwD3D1XEngine::Im2DRenderIndexedPrimitive( RwPrimitiveType primType, RwIm2
 
 bool CRwD3D1XEngine::RasterCreate( RwRaster *raster, UINT flags )
 {
+    FrameProfiler::EventScope profile( FrameProfiler::EventRasterCreate );
+    profile.Detail( "%dx%d type %d", raster->width, raster->height, flags & rwRASTERTYPEMASK );
     RwD3D1XRaster* d3dRaster = GetD3D1XRaster( raster );
     // Init renderware raster data
     raster->cType = flags & rwRASTERTYPEMASK;
@@ -534,6 +537,7 @@ bool CRwD3D1XEngine::RasterDestroy( RwRaster *raster )
 
 bool CRwD3D1XEngine::NativeTextureRead( RwStream *stream, RwTexture** tex )
 {
+    FrameProfiler::EventScope profile( FrameProfiler::EventTextureRead );
     _rwNativeTexture textureInfo; RasterFormat rasterInfo;
     unsigned int lengthOut, versionOut; unsigned char savedFormat;
     RwRaster *raster = nullptr;
@@ -709,6 +713,7 @@ bool CRwD3D1XEngine::NativeTextureRead( RwStream *stream, RwTexture** tex )
         RwTextureSetAddressingVMacro( texture, textureInfo.vAddressing );
         RwTextureSetName( texture, textureInfo.name );
         RwTextureSetMaskName( texture, textureInfo.mask );
+        profile.Detail( "%s %dx%d", textureInfo.name, raster->width, raster->height );
         *tex = texture;
     }
 
@@ -747,6 +752,8 @@ bool CRwD3D1XEngine::RasterLock( RwRaster *raster, UINT flags, void** data )
     *data = (void*)raster->cpPixels;
     if ( flags&rwRASTERLOCKREAD /*|| d3dRaster->resourse->hasPalette()*/ )
     {
+        FrameProfiler::EventScope profile( FrameProfiler::EventLockRead );
+        profile.Detail( "%dx%d level %u format %d", raster->width, raster->height, level, int( d3dRaster->format ) );
         *data = d3dRaster->resourse->LockToRead();
     }
     return true;
@@ -761,9 +768,18 @@ bool CRwD3D1XEngine::RasterUnlock( RwRaster *raster )
     {
         auto d3dtexture = d3dRaster->resourse;
         if ( !d3dtexture->IsLockedToRead() )
+        {
+            FrameProfiler::EventScope profile( FrameProfiler::EventTextureUpload );
+            profile.Detail( "%dx%d level %u", raster->width, raster->height, d3dRaster->lockFlags );
+            FrameProfiler::AddUploadBytes( raster->stride * raster->height );
             m_pRenderer->getContext()->UpdateSubresource( d3dtexture->GetResource(), d3dRaster->lockFlags, nullptr, raster->cpPixels, raster->stride, 0 );
+        }
         else
+        {
+            FrameProfiler::EventScope profile( FrameProfiler::EventUnlockRead );
+            profile.Detail( "%dx%d", raster->width, raster->height );
             d3dtexture->UnlockFromRead();
+        }
     }
     free( raster->cpPixels );
     raster->cpPixels = nullptr;

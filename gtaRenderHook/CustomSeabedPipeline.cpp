@@ -1,6 +1,7 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check it.
 // PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include "stdafx.h"
+#include "FrameProfiler.h"
 #include "CustomSeabedPipeline.h"
 #include "D3DRenderer.h"
 #include "CDebug.h"
@@ -78,6 +79,7 @@ void CCustomSeabedPipeline::RenderSeabed( RwIm3DVertex * verticles, UINT vertexC
         D3D11_MAPPED_SUBRESOURCE mappedResource;
         ZeroMemory( &mappedResource, sizeof( D3D11_MAPPED_SUBRESOURCE ) );
         //	Disable GPU access to the vertex buffer data.
+        FrameProfiler::EventScope profileVb( FrameProfiler::EventBufferMap );
         devContext->Map( m_pVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource );
         //	Update the vertex buffer here.
         memcpy( mappedResource.pData, verticles, sizeof( RwIm3DVertex )*vertexCount );

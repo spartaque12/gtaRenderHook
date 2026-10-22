@@ -8,6 +8,7 @@
 #include "D3D1XStateManager.h"
 #include "RwD3D1XEngine.h"
 #include "D3D1XEnumParser.h"
+#include "FrameProfiler.h"
 
 CD3D1XIm3DPipeline::CD3D1XIm3DPipeline() :
 #ifndef DebuggingShaders
@@ -65,11 +66,13 @@ RwBool CD3D1XIm3DPipeline::SubmitNode()
             g_pStateMgr->SetIndexBuffer( m_pIndexBuffer->getBuffer() );
 
             g_pStateMgr->FlushStates();
+            FrameProfiler::AddDrawCall();
             pImmediateContext->DrawIndexed( im3dPoolStash.numIndices, 0, 0 );
         }
         else
         {
             g_pStateMgr->FlushStates();
+            FrameProfiler::AddDrawCall();
             pImmediateContext->Draw( rwD3D9ImmPool->numElements, 0 );
         }
     }

@@ -1,6 +1,7 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check it.
 // PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include "stdafx.h"
+#include "FrameProfiler.h"
 #include "D3D1XBuffer.h"
 #include "RwD3D1XEngine.h"
 #include "D3DRenderer.h"
@@ -35,6 +36,7 @@ void CD3D1XBuffer::Update( void * data, int size )
 {
     auto context = GET_D3D_CONTEXT;
     D3D11_MAPPED_SUBRESOURCE mappedResource;
+    FrameProfiler::EventScope profile( FrameProfiler::EventBufferMap );
     context->Map( m_pBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource );
     memcpy( mappedResource.pData, data, size < 0 ? m_uiSize : size );
     context->Unmap( m_pBuffer, 0 );

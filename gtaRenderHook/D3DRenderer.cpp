@@ -2,6 +2,7 @@
 // PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include "stdafx.h"
 #include "D3DRenderer.h"
+#include "FrameProfiler.h"
 #include "D3D1XDepthStencilTexture.h"
 #include "D3D1XBaseTexture.h"
 #include "D3D1X2DRenderTarget.h"
@@ -356,11 +357,16 @@ void CD3DRenderer::Clear( RwCamera *camera, RwRGBA& color, RwInt32 flags )
 
 void CD3DRenderer::Present( bool VSync )
 {
-    m_pSwapChain->Present( VSync ? 1 : 0, 0 );
+    {
+        RH_PROFILE_ZONE( ZonePresent );
+        m_pSwapChain->Present( VSync ? 1 : 0, 0 );
+    }
+    FrameProfiler::EndFrame();
 }
 
 void CD3DRenderer::DrawIndexed( UINT indexCount, UINT startIndex, UINT baseVertex )
 {
+    FrameProfiler::AddDrawCall();
     m_pImmediateContext->DrawIndexed( indexCount, startIndex, baseVertex );
 }
 

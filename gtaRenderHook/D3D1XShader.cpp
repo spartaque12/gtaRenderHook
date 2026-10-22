@@ -1,6 +1,7 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include "D3D1XShader.h"
+#include "FrameProfiler.h"
 #include "CDebug.h"
 #include "D3D1XShaderDefines.h"
 #include "D3D1XStateManager.h"
@@ -8,6 +9,7 @@
 #include "D3DSpecificHelpers.h"
 #include "RwD3D1XEngine.h"
 #include "stdafx.h"
+#include "FrameProfiler.h"
 #include <d3dcompiler.h>
 
 
@@ -48,6 +50,8 @@ HRESULT CD3D1XShader::CompileShaderFromFile(
     std::string szFileName, std::string szEntryPoint, std::string szShaderModel,
     ID3DBlob **ppBlobOut, CD3D1XShaderDefineList *localShaderDefineList ) const
 {
+    FrameProfiler::EventScope profile( FrameProfiler::EventShaderCompile );
+    profile.Detail( "%s %s", szFileName.c_str(), szEntryPoint.c_str() );
     auto hr = S_OK;
 
     DWORD dwShaderFlags = 0;

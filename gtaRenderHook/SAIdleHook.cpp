@@ -43,6 +43,7 @@
 #include "FullscreenQuad.h"
 #include "CubemapReflectionRenderer.h"
 #include "TemporalAA.h"
+#include "FrameProfiler.h"
 //#include <game_sa\CGlass.h>
 //#include <game_sa\CSkidmarks.h>
 
@@ -71,12 +72,14 @@ static RpMaterial *SetGrassMaterialColour( RpMaterial *material, void *data )
 
 void CSAIdleHook::Patch()
 {
+    FrameProfiler::Init();
     RedirectCall( 0x53ECBD, Idle );
     SetPointer( 0x5DAEC8, SetGrassMaterialColour ); // operand of push 5DAC10h in CGrassRenderer::DrawTriPlants
 }
 
 void CSAIdleHook::Idle( void *Data )
 {
+    RH_PROFILE_ZONE( ZoneIdle );
     SettingsHolder::Instance()->InitGUI();
     if ( !gDebugSettings.GetToggleField( "UseIdleHook" ) )
     {
@@ -85,18 +88,27 @@ void CSAIdleHook::Idle( void *Data )
         SettingsHolder::Instance()->DrawGUI();
         return;
     }
-    SettingsHolder::Instance()->ReloadShadersIfRequired();
+    {
+        RH_PROFILE_ZONE( ZoneReloads );
+        SettingsHolder::Instance()->ReloadShadersIfRequired();
+    }
     // Update timers
-    TimeUpdate();
+    {
+        RH_PROFILE_ZONE( ZoneTimeUpdate );
+        TimeUpdate();
+    }
     // Init 2D stuff per frame.
     InitPerFrame2D();
     // Update game processes
     GameUpdate();
     // Update lighting
-    LightUpdate();
+    {
+        RH_PROFILE_ZONE( ZoneLightUpdate );
+        LightUpdate();
+    }
 
     // reload textures if required
-    g_pDeferredRenderer->QueueTextureReload();
+    FrameProfiler::BeginZone( FrameProfiler::ZoneReloads );    g_pDeferredRenderer->QueueTextureReload();
     CVolumetricLighting::QueueTextureReload();
     CCloudRendering::QueueTextureReload();
     CAmbientOcclusion::QueueTextureReload();
@@ -117,6 +129,7 @@ void CSAIdleHook::Idle( void *Data )
         CAmbientOcclusion::m_bRequiresReloading                      = false;
         CCloudRendering::m_bRequiresReloading                        = false;
     }
+    FrameProfiler::EndZone( FrameProfiler::ZoneReloads );
 
     if ( !Data )
         return;
@@ -126,6 +139,7 @@ void CSAIdleHook::Idle( void *Data )
     if ( !FrontEndMenuManager.m_bMenuActive && TheCamera.GetScreenFadeStatus() != 2 )
     {
         RenderInGame();
+        RH_PROFILE_ZONE( ZoneGUI );
         SettingsHolder::Instance()->DrawGUI();
         DefinedState2d();
         if ( SettingsHolder::Instance()->IsGUIEnabled() )
@@ -140,6 +154,7 @@ void CSAIdleHook::Idle( void *Data )
                 { 255,255,255,255 } );
         }
     }
+    RH_PROFILE_ZONE( ZoneHUD );
     RenderHUD();
 }
 
@@ -178,6 +193,8 @@ void CSAIdleHook::RenderInGame()
     CPerfTimer deferredTimer( "Deferred Time" );
     CPerfTimer scanTimer( "Renderlist construction time" );
     CPerfTimer gameTimer( "Game Time" );
+    RH_PROFILE_ZONE( ZoneRenderInGame );
+    FrameProfiler::BeginZone( FrameProfiler::ZonePrepare );
 
     PrepareRenderStuff();
 
@@ -220,12 +237,19 @@ void CSAIdleHook::RenderInGame()
                                         CTimeCycle::m_CurrentColours.m_fPostFx2Alpha / 255.0f };
     g_shaderRenderStateBuffer.fFarClip = Scene.m_pRwCamera->farPlane;
 
+    FrameProfiler::EndZone( FrameProfiler::ZonePrepare );
     // First forward pass(clouds, sky etc.)
-    RenderForwardBeforeDeferred();
+    {
+        RH_PROFILE_ZONE( ZoneForwardBefore );
+        RenderForwardBeforeDeferred();
+    }
 
     g_pDeferredRenderer->m_pShadowRenderer->m_bShadowsRendered = false;
     if ( !CGame::currArea && ( m_fShadowDNBalance < 1.0 ) )
+    {
+        RH_PROFILE_ZONE( ZoneShadowPrepare );
         PrepareRealTimeShadows( sunDirs[curr_sun_dir] );
+    }
 
     DebugRendering::ResetList();
 
@@ -237,21 +261,29 @@ void CSAIdleHook::RenderInGame()
     m_uiDeferredStage = 5;
     //
     scanTimer.Start();
+    FrameProfiler::BeginZone( FrameProfiler::ZoneRenderList );
     CRendererRH::ConstructRenderList();
+    FrameProfiler::EndZone( FrameProfiler::ZoneRenderList );
     scanTimer.Stop();
 
+    FrameProfiler::BeginZone( FrameProfiler::ZonePreRender );
     CRenderer::PreRender();
     CRendererRH::PreRender();
     CWorld::ProcessPedsAfterPreRender();
+    FrameProfiler::EndZone( FrameProfiler::ZonePreRender );
 
     RwCameraEndUpdate( Scene.m_pRwCamera );
+    FrameProfiler::BeginZone( FrameProfiler::ZoneCubemap );
     g_pDeferredRenderer->RenderToCubemap( RenderForward );
+    FrameProfiler::EndZone( FrameProfiler::ZoneCubemap );
 
     shadowTimer.Start();
+    FrameProfiler::BeginZone( FrameProfiler::ZoneShadows );
 
     if ( !CGame::currArea&&m_fShadowDNBalance < 1.0 ) // Render shadows only if we are not inside interiors
         RenderRealTimeShadows( sunDirs[curr_sun_dir] );
 
+    FrameProfiler::EndZone( FrameProfiler::ZoneShadows );
     shadowTimer.Stop();
 
     RwCameraBeginUpdate( Scene.m_pRwCamera );
@@ -261,7 +293,9 @@ void CSAIdleHook::RenderInGame()
     g_pCustomBuildingPipe->ResetAlphaList();
     g_pCustomBuildingDNPipe->ResetAlphaList();
     // Render scene to geometry buffers.
+    FrameProfiler::BeginZone( FrameProfiler::ZoneGBuffer );
     g_pDeferredRenderer->RenderToGBuffer( RenderDeferred );
+    FrameProfiler::EndZone( FrameProfiler::ZoneGBuffer );
 
     // Reset renderstates and disable Z-Test
     DefinedState();
@@ -270,7 +304,9 @@ void CSAIdleHook::RenderInGame()
     // Render deferred shading
     CD3DRenderer* renderer = static_cast<CRwD3D1XEngine*>( g_pRwCustomEngine )->getRenderer();
     renderer->BeginDebugEvent( L"Deferred composition pass" );
+    FrameProfiler::BeginZone( FrameProfiler::ZoneDeferred );
     g_pDeferredRenderer->RenderOutput();
+    FrameProfiler::EndZone( FrameProfiler::ZoneDeferred );
     renderer->EndDebugEvent();
     deferredTimer.Stop();
 
@@ -279,12 +315,16 @@ void CSAIdleHook::RenderInGame()
     m_uiDeferredStage = 0;
 
     renderer->BeginDebugEvent( L"Forward after deferred" );
+    FrameProfiler::BeginZone( FrameProfiler::ZoneForwardAfter );
     RenderForwardAfterDeferred();
+    FrameProfiler::EndZone( FrameProfiler::ZoneForwardAfter );
     renderer->EndDebugEvent();
 
     g_pRwCustomEngine->RenderStateSet( rwRENDERSTATEZTESTENABLE, 0 );
     renderer->BeginDebugEvent( L"Tonemapping pass" );
+    FrameProfiler::BeginZone( FrameProfiler::ZoneTonemap );
     g_pDeferredRenderer->RenderTonemappedOutput(); //TODO fix
+    FrameProfiler::EndZone( FrameProfiler::ZoneTonemap );
     renderer->EndDebugEvent();
     //g_pRwCustomEngine->SetRenderTargets( &Scene.m_pRwCamera->frameBuffer,
     //                                     Scene.m_pRwCamera->zBuffer, 1 );
@@ -295,7 +335,9 @@ void CSAIdleHook::RenderInGame()
 
     DefinedState();
     int Render2dStuffAddress = *(DWORD *)0x53EB13 + 0x53EB12 + 5;
+    FrameProfiler::BeginZone( FrameProfiler::Zone2D );
     ( ( int( __cdecl * )( ) )Render2dStuffAddress )( );
+    FrameProfiler::EndZone( FrameProfiler::Zone2D );
     //Render2dStuff();
     // Render preformance counters if required.
     if ( gDebugSettings.GetToggleField( "ShowPreformanceCounters" ) )
@@ -589,7 +631,10 @@ void CSAIdleHook::LightUpdate()
 
 void CSAIdleHook::GameUpdate()
 {
+    FrameProfiler::BeginZone( FrameProfiler::ZoneGameUpdate );
     CGame::Process();
+    FrameProfiler::EndZone( FrameProfiler::ZoneGameUpdate );
+    RH_PROFILE_ZONE( ZoneAudio );
     CAudioEngine__Service( AudioEngine );
 }
 
