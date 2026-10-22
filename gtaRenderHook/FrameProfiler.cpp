@@ -322,6 +322,8 @@ void Finalize( Slot &slot )
 {
     slot.pending = false;
     const FrameRecord &r = slot.record;
+    if ( r.cpuMs[ZoneRenderInGame] <= 0.0 )   // loading screen or menu: the world was not rendered
+        return;
     Summary &s = g_summary;
     s.frameMs.push_back( float( r.frameMs ) );
     for ( int z = 0; z < ZoneCount; ++z )
