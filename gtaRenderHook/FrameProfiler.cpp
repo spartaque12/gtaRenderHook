@@ -7,6 +7,7 @@
 #include <game_sa\CStreaming.h>
 #include <dxgi1_4.h>
 #include <psapi.h>
+#include <timeapi.h>
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
@@ -14,6 +15,7 @@
 #include <intrin.h>
 
 #pragma comment( lib, "psapi.lib" )
+#pragma comment( lib, "winmm.lib" )
 
 extern int drawCallCount;
 
@@ -116,6 +118,164 @@ static __declspec( naked ) void ProfSiteExit()
     }
 }
 
+// ------------------------------------------------------------------------------------------------ plugin code sampler
+// While the main thread is in CGame::Process but not inside one of the timed calls - i.e. in other plugins' hooks
+// wrapped around it - a sampler thread pauses it about 1000 times a second and records which module's code it is in.
+// Time in Windows/driver DLLs is charged to the first plugin/game return address on the stack.
+namespace
+{
+volatile LONG g_profInGameLogic;
+struct ProfModule
+{
+    uintptr_t lo, hi;
+    char      name[64];
+    bool      system;
+};
+ProfModule    g_profModules[256];
+volatile LONG g_profModuleCount;
+struct ProfSample
+{
+    int64_t   t;
+    uintptr_t addr;
+};
+const LONG    kProfRing = 1 << 13;
+ProfSample    g_profRing[kProfRing];
+volatile LONG g_profWritten;
+DWORD         g_profMainThreadId;
+uintptr_t     g_profStackBase;
+
+bool ProfIsSystemName( const char *name )
+{
+    static const char *const kSystem[] = { "ntdll.dll", "kernel32.dll", "kernelbase.dll", "win32u.dll", "user32.dll",
+                                           "ucrtbase.dll", "msvcrt.dll", "msvcp_win.dll", "gdi32.dll", "gdi32full.dll",
+                                           "d3d11.dll", "dxgi.dll", "dxcore.dll", "nvwgf2um.dll", "vcruntime140.dll",
+                                           "msvcp140.dll", "combase.dll", "std.asi.dll", "modloader.asi" };
+    for ( const char *n : kSystem )
+        if ( _stricmp( n, name ) == 0 )
+            return true;
+    return false;
+}
+
+void ProfRefreshModules()
+{
+    HMODULE mods[256];
+    DWORD   needed = 0;
+    if ( !EnumProcessModules( GetCurrentProcess(), mods, sizeof mods, &needed ) )
+        return;
+    const int n = min( int( needed / sizeof( HMODULE ) ), 256 );
+    for ( int i = 0; i < n; ++i )
+    {
+        MODULEINFO mi;
+        if ( !GetModuleInformation( GetCurrentProcess(), mods[i], &mi, sizeof mi ) )
+            continue;
+        const uintptr_t lo = reinterpret_cast<uintptr_t>( mi.lpBaseOfDll );
+        bool known = false;
+        for ( int k = 0; k < g_profModuleCount && !known; ++k )
+            known = g_profModules[k].lo == lo;
+        if ( known || g_profModuleCount >= 256 )
+            continue;
+        ProfModule &m = g_profModules[g_profModuleCount];
+        m.lo = lo;
+        m.hi = lo + mi.SizeOfImage;
+        GetModuleBaseNameA( GetCurrentProcess(), mods[i], m.name, sizeof m.name );
+        m.system = ProfIsSystemName( m.name );
+        InterlockedIncrement( &g_profModuleCount );   // entry complete before it is counted
+    }
+}
+
+int ProfFindModule( uintptr_t a )
+{
+    const int n = g_profModuleCount;
+    for ( int k = 0; k < n; ++k )
+        if ( a >= g_profModules[k].lo && a < g_profModules[k].hi )
+            return k;
+    return -1;
+}
+
+// True if the bytes before v are a call instruction (v is a return address).
+bool ProfIsAfterCall( uintptr_t v )
+{
+    const uint8_t *c = reinterpret_cast<const uint8_t *>( v );
+    if ( c[-5] == 0xE8 )
+        return true;
+    if ( c[-6] == 0xFF && ( c[-5] == 0x15 || ( c[-5] >= 0x90 && c[-5] <= 0x97 && c[-5] != 0x94 ) ) )
+        return true;
+    if ( c[-3] == 0xFF && c[-2] >= 0x50 && c[-2] <= 0x57 && c[-2] != 0x54 )
+        return true;
+    if ( c[-2] == 0xFF && ( ( c[-1] >= 0xD0 && c[-1] <= 0xD7 ) || ( c[-1] >= 0x10 && c[-1] <= 0x17 && c[-1] != 0x14 && c[-1] != 0x15 ) ) )
+        return true;
+    return false;
+}
+
+DWORD WINAPI ProfSampler( LPVOID )
+{
+    HANDLE main = OpenThread( THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, g_profMainThreadId );
+    if ( !main )
+        return 0;
+    SetThreadPriority( GetCurrentThread(), THREAD_PRIORITY_HIGHEST );
+    timeBeginPeriod( 1 );
+    static uintptr_t stack[2048];
+    DWORD lastRefresh = 0;
+    for ( ;; )
+    {
+        Sleep( 1 );
+        if ( GetTickCount() - lastRefresh > 2000 )
+        {
+            ProfRefreshModules();
+            lastRefresh = GetTickCount();
+        }
+        if ( !g_profInGameLogic || g_profSiteDepth )
+            continue;
+        if ( SuspendThread( main ) == DWORD( -1 ) )
+            continue;
+        // Only the context and a copy of the stack top while suspended: no locks, no allocation.
+        CONTEXT ctx;
+        ctx.ContextFlags = CONTEXT_CONTROL;
+        const bool inRegion = g_profInGameLogic && !g_profSiteDepth;
+        const bool ok = inRegion && GetThreadContext( main, &ctx );
+        LARGE_INTEGER t;
+        QueryPerformanceCounter( &t );
+        int words = 0;
+        if ( ok && ctx.Esp < g_profStackBase && g_profStackBase - ctx.Esp < 0x1000000 )
+        {
+            words = int( ( std::min )( uintptr_t( g_profStackBase - ctx.Esp ) / 4, uintptr_t( 2048 ) ) );
+            __try
+            {
+                memcpy( stack, reinterpret_cast<void *>( ctx.Esp ), words * 4 );
+            }
+            __except ( EXCEPTION_EXECUTE_HANDLER )
+            {
+                words = 0;
+            }
+        }
+        ResumeThread( main );
+        if ( !ok )
+            continue;
+        uintptr_t addr = ctx.Eip;
+        const int m = ProfFindModule( addr );
+        if ( m < 0 || g_profModules[m].system )
+        {
+            addr = 0;
+            __try
+            {
+                for ( int i = 0; i < words && !addr; ++i )
+                {
+                    const int vm = ProfFindModule( stack[i] );
+                    if ( vm >= 0 && !g_profModules[vm].system && stack[i] >= g_profModules[vm].lo + 0x1007 &&
+                         ProfIsAfterCall( stack[i] ) )
+                        addr = stack[i];
+                }
+            }
+            __except ( EXCEPTION_EXECUTE_HANDLER )
+            {
+            }
+        }
+        g_profRing[g_profWritten & ( kProfRing - 1 )] = { t.QuadPart, addr };
+        InterlockedIncrement( &g_profWritten );
+    }
+}
+} // namespace
+
 static __declspec( naked ) void ProfSiteEnter()
 {
     __asm {
@@ -173,6 +333,14 @@ struct FrameRecord
     uint32_t   pageFaults;
     double     onCpuPct;                 // share of the frame the main thread was running on a CPU core
     double     siteMs[kProfSiteCount];   // CGame::Process calls
+    // plugin code around CGame::Process (sampled): the modules with the most samples, and each one's hottest spot
+    struct PluginShare
+    {
+        int16_t   module;
+        uint16_t  count;
+        uintptr_t hottest;
+    } plugins[4];
+    uint16_t   pluginSamples;
 };
 
 // GPU timestamps are read back kSlots - 1 frames later, so each slot keeps its frame's record until then.
@@ -221,6 +389,7 @@ struct Summary
     uint64_t            draws, uploadBytes;
     uint32_t            slowFrames;
     double              siteSum[kProfSiteCount], siteMax[kProfSiteCount];
+    uint32_t            slowPluginSamples[257];   // per module (+1 for unknown), slow frames only
 } g_summary;
 
 int64_t Now()
@@ -357,6 +526,67 @@ void MemoryLine( Line &line )
     }
 }
 
+// Plugin samples of one frame, taken between from and to.
+void CollectPluginSamples( FrameRecord &r, int64_t from, int64_t to )
+{
+    struct Bucket
+    {
+        uintptr_t addr;
+        uint16_t  count;
+    } buckets[256];
+    int      used = 0;
+    uint16_t moduleCount[257] = {};
+    const LONG end = g_profWritten;
+    for ( LONG i = max( 0L, end - kProfRing ); i < end; ++i )
+    {
+        const ProfSample &smp = g_profRing[i & ( kProfRing - 1 )];
+        if ( smp.t <= from || smp.t > to )
+            continue;
+        ++r.pluginSamples;
+        const int m = smp.addr ? ProfFindModule( smp.addr ) : -1;
+        ++moduleCount[m + 1];
+        const uintptr_t key = smp.addr & ~uintptr_t( 15 );
+        int b = 0;
+        while ( b < used && buckets[b].addr != key )
+            ++b;
+        if ( b == used && used < 256 )
+            buckets[used++] = { key, 0 };
+        if ( b < used )
+            ++buckets[b].count;
+    }
+    for ( int k = 0; k < 4; ++k )
+    {
+        int best = -2;
+        uint16_t bestCount = 0;
+        for ( int m = -1; m < 256; ++m )
+            if ( moduleCount[m + 1] > bestCount )
+            {
+                bestCount = moduleCount[m + 1];
+                best = m;
+            }
+        if ( best == -2 )
+            break;
+        moduleCount[best + 1] = 0;
+        uintptr_t hottest = 0;
+        uint16_t hotCount = 0;
+        for ( int b = 0; b < used; ++b )
+            if ( buckets[b].count > hotCount && ( best < 0 ? !buckets[b].addr : ProfFindModule( buckets[b].addr ) == best ) )
+            {
+                hotCount = buckets[b].count;
+                hottest = buckets[b].addr;
+            }
+        r.plugins[k] = { int16_t( best ), bestCount, hottest };
+    }
+}
+
+void PluginName( char *out, size_t n, int module )
+{
+    if ( module < 0 )
+        strcpy_s( out, n, "unknown (no plugin/game code on the stack)" );
+    else
+        _snprintf_s( out, n, _TRUNCATE, "%s", g_profModules[module].name );
+}
+
 // Frame time not inside any top-level zone: other plugins' code in the game loop, Windows messages, end-of-frame work.
 double Untimed( const FrameRecord &r )
 {
@@ -390,6 +620,23 @@ void LogFrame( const FrameRecord &r )
     SiteLine( gl, r.siteMs, 1.0, nullptr, 6, 0.1 );
     gl.Add( " not in these calls (plugin hooks around CGame::Process) %.2f", max( 0.0, r.cpuMs[ZoneGameUpdate] - inCalls ) );
     Log( "%s", gl.buf );
+    if ( r.pluginSamples )
+    {
+        Line pl;
+        pl.Add( "  plugin hooks around CGame::Process (%u samples):", r.pluginSamples );
+        for ( const auto &share : r.plugins )
+        {
+            if ( !share.count )
+                break;
+            char name[96];
+            PluginName( name, sizeof name, share.module );
+            pl.Add( " %s %.0f%%", name, 100.0 * share.count / r.pluginSamples );
+            if ( share.module >= 0 && share.hottest )
+                pl.Add( " (hottest +0x%X)", unsigned( share.hottest - g_profModules[share.module].lo ) );
+            pl.Add( " |" );
+        }
+        Log( "%s", pl.buf );
+    }
     if ( r.gpuValid )
     {
         Line gpu;
@@ -466,6 +713,30 @@ void LogSummary( int64_t now )
     gl.Add( "  game logic calls avg/max ms:" );
     SiteLine( gl, s.siteSum, 1.0 / n, s.siteMax, 10, 0.05 );
     Log( "%s", gl.buf );
+    uint32_t pluginTotal = 0;
+    for ( uint32_t c : s.slowPluginSamples )
+        pluginTotal += c;
+    if ( pluginTotal )
+    {
+        Line pl;
+        pl.Add( "  slow frames, plugin hooks around CGame::Process (%u samples):", pluginTotal );
+        uint32_t counts[257];
+        memcpy( counts, s.slowPluginSamples, sizeof counts );
+        for ( int k = 0; k < 6; ++k )
+        {
+            int best = -1;
+            for ( int i = 0; i < 257; ++i )
+                if ( counts[i] && ( best < 0 || counts[i] > counts[best] ) )
+                    best = i;
+            if ( best < 0 )
+                break;
+            char name[96];
+            PluginName( name, sizeof name, best - 1 );
+            pl.Add( " %s %.0f%% |", name, 100.0 * counts[best] / pluginTotal );
+            counts[best] = 0;
+        }
+        Log( "%s", pl.buf );
+    }
     Line ev;
     ev.Add( "  events (count, total ms, longest ms):" );
     for ( int e = 0; e < EventCount; ++e )
@@ -519,6 +790,9 @@ void Finalize( Slot &slot )
     if ( r.frameMs > g_slowMs )
     {
         ++s.slowFrames;
+        for ( const auto &share : r.plugins )
+            if ( share.count )
+                s.slowPluginSamples[share.module + 1] += share.count;
         LogFrame( r );
     }
 }
@@ -610,6 +884,11 @@ void InstallGameProcessHooks()
     }
     FlushInstructionCache( GetCurrentProcess(), nullptr, 0 );
     Log( "timing %d calls made by CGame::Process (%d of them hooked by other plugins)", installed, hooked );
+    g_profMainThreadId = GetCurrentThreadId();
+    g_profStackBase = reinterpret_cast<uintptr_t>( reinterpret_cast<NT_TIB *>( NtCurrentTeb() )->StackBase );
+    ProfRefreshModules();
+    if ( HANDLE th = CreateThread( nullptr, 0, ProfSampler, nullptr, 0, nullptr ) )
+        CloseHandle( th );
     for ( const ProfSite &site : g_profSites )
         if ( site.target && site.target != site.original )
             Log( "  %s", site.label );
@@ -646,6 +925,8 @@ void BeginZone( Zone zone )
 {
     if ( GetCurrentThreadId() != g_mainThread || g_zoneDepth[zone]++ )
         return;
+    if ( zone == ZoneGameUpdate )
+        g_profInGameLogic = 1;
     g_zoneStart[zone] = Now();
     if ( zone == ZonePresent && g_gpuReady && g_gpuTimers && !g_gpuFailed && g_slots[g_current].used[ZoneFrame] )
         g_context->End( g_slots[g_current].end[ZoneFrame] );
@@ -664,6 +945,8 @@ void EndZone( Zone zone )
 {
     if ( GetCurrentThreadId() != g_mainThread || !g_zoneDepth[zone] || --g_zoneDepth[zone] )
         return;
+    if ( zone == ZoneGameUpdate )
+        g_profInGameLogic = 0;
     g_slots[g_current].record.cpuMs[zone] += Ms( Now() - g_zoneStart[zone] );
     if ( g_gpuReady && g_gpuTimers && !g_gpuFailed && kGpuZone[zone] && g_slots[g_current].used[zone] )
         g_context->End( g_slots[g_current].end[zone] );
@@ -735,6 +1018,7 @@ void EndFrame()
     FrameRecord &r = slot.record;
     r.frameMs = Ms( now - g_lastFrameEnd );
     GetLocalTime( &r.time );
+    CollectPluginSamples( r, g_lastFrameEnd, now );
     // QueryThreadCycleTime counts in TSC ticks; the TSC rate is measured against the QPC clock since the first frame.
     ULONG64 cycles = 0;
     QueryThreadCycleTime( GetCurrentThread(), &cycles );
