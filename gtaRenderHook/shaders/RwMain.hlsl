@@ -1,4 +1,5 @@
 #include "GameMath.hlsl"
+#include "GBuffer.hlsl"
 //--------------------------------------------------------------------------------------
 // Constant Buffer Variables
 //--------------------------------------------------------------------------------------
@@ -21,6 +22,7 @@ struct PS_MAIN_IN
 	float4 vColor		: COLOR;
 	float3 vNormal		: NORMAL;
 	float2 vTexCoord		: TEXCOORD0;
+	float  fViewZ		: TEXCOORD1;
 };
 
 //--------------------------------------------------------------------------------------
@@ -32,6 +34,7 @@ PS_MAIN_IN VS(VS_MAIN_IN i)
 	float4 	outPos 	= float4( i.vPosition,1.0);// transform to screen space
 			outPos 	= mul( outPos, mWorld );
 			outPos	= mul( outPos, mView );
+    o.fViewZ        = outPos.z;
     o.vPosition 	= mul( outPos, mProjection );
 	o.vNormal   	= mul( i.vInNormal, (float3x3)mWorld);
     o.vTexCoord     = i.vTexCoord;
@@ -51,4 +54,16 @@ float4 PS(PS_MAIN_IN i) : SV_Target
 	
     DO_ALPHA_TEST(OutColor.a)
     return OutColor;
+}
+//--------------------------------------------------------------------------------------
+// G-buffer pixel shader: the G-buffer can't be alpha-blended, so transparent texels are cut out
+//--------------------------------------------------------------------------------------
+PS_DEFERRED_OUT DeferredPS(PS_MAIN_IN i)
+{
+    PS_DEFERRED_OUT Out;
+    float4 baseColor = txDiffuse.Sample(samLinear, i.vTexCoord) * cDiffuseColor;
+    if (baseColor.a * i.vColor.w < 0.3)
+        discard;
+    FillGBuffer(Out, baseColor, i.vNormal, i.fViewZ, float4(fSpecularIntensity, fGlossiness, 0, 0));
+    return Out;
 }

@@ -36,6 +36,10 @@ public:
 
   private:
     /*!
+        Fills the G-buffer (pixel shader DeferredPS) while the deferred stage renders to it
+    */
+    CD3D1XShader *m_pDeferredPS = nullptr;
+    /*!
         Generates normals, tangents and bitangents for verticies
     */
     static void GenerateNormals( SimpleVertex *verticles,

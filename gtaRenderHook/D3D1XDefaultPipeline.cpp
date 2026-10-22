@@ -16,15 +16,19 @@
 #include "D3D1XVertexBuffer.h"
 #include "D3D1XIndexBuffer.h"
 #include "RwVectorMath.h"
+#include "DeferredRenderer.h"
+#include <game_sa\CWeather.h>
 
 CD3D1XDefaultPipeline::CD3D1XDefaultPipeline() :
     CD3D1XPipeline( "RwMain" )
 {
+    m_pDeferredPS = new CD3D1XPixelShader( "shaders/" + m_sPipeName + ".hlsl", "DeferredPS" );
 }
 
 
 CD3D1XDefaultPipeline::~CD3D1XDefaultPipeline()
 {
+    delete m_pDeferredPS;
 }
 
 bool CD3D1XDefaultPipeline::Instance( void *object, RxD3D9ResEntryHeader *resEntryHeader, RwBool reinstance ) const
@@ -151,8 +155,14 @@ void CD3D1XDefaultPipeline::Render( RwResEntry * repEntry, void * object, RwUInt
     g_pStateMgr->SetVertexBuffer( ( (CD3D1XVertexBuffer*)entryData->header.vertexStream[0].vertexBuffer )->getBuffer(), sizeof( SimpleVertex ), 0 );
     g_pStateMgr->SetIndexBuffer( ( (CD3D1XIndexBuffer*)entryData->header.indexBuffer )->getBuffer() );
     g_pStateMgr->SetPrimitiveTopology( CD3D1XEnumParser::ConvertPrimTopology( (RwPrimitiveType)entryData->header.primType ) );
+    // In the G-buffer stage every G-buffer target has to be written, and blending would mix them with what is behind
+    // (e.g. a knocked-over lamppost, which the game draws through this pipeline, came out see-through).
+    const bool gBuffer = m_uiDeferredStage == 1;
     m_pVS->Set();
-    m_pPS->Set();
+    if ( gBuffer )
+        m_pDeferredPS->Set();
+    else
+        m_pPS->Set();
 
     // iterate over materials and draw them
     RwUInt8 alphaBlend;
@@ -172,6 +182,14 @@ void CD3D1XDefaultPipeline::Render( RwResEntry * repEntry, void * object, RwUInt
         {
             alphaBlend |= GetD3D1XRaster( material->texture->raster )->alpha;
             g_pRwCustomEngine->SetTexture( material->texture, 0 );
+        }
+        if ( gBuffer )
+        {
+            // DeferredPS cuts out transparent texels instead of blending
+            g_pRenderBuffersMgr->UpdateMaterialSpecularInt(
+                max( CWeather::WetRoads, CCustomCarEnvMapPipeline__GetFxSpecSpecularity( material ) ) );
+            g_pRenderBuffersMgr->UpdateMaterialGlossiness( RpMaterialGetFxEnvShininess( material ) );
+            alphaBlend = 0;
         }
         // set alpha blending
         g_pStateMgr->SetAlphaBlendEnable( alphaBlend > 0 );
