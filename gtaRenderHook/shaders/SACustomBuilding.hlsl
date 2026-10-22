@@ -206,9 +206,6 @@ PS_DEFERRED_OUT DeferredPS(PS_DEFERRED_IN i)
                  params );
 	if (baseColor.a < 0.3)
 		discard;
-	// fading entity (LOD cross-fade, material alpha below 1): dither the fade
-	if (cDiffuseColor.a < 0.999f && cDiffuseColor.a < InterleavedGradientNoise(i.vPosition.xy))
-		discard;
 	
 	return Out;
 }
