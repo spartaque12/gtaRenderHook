@@ -202,7 +202,10 @@ void CCustomBuildingPipeline::Render( RwResEntry *repEntry, void *object,
         else
         {
             g_pStateMgr->SetAlphaBlendEnable( FALSE );
-            if ( bAlphaEnable > 0 )
+            // A fading entity (LOD cross-fade) gets its fade through the material alpha, which the game restores right
+            // after drawing it: on the forward alpha list it would be drawn fully opaque, and lit by the forward shader
+            // instead of the deferred one, so distant LODs popped in dark. Dither it into the G-buffer instead.
+            if ( bAlphaEnable > 0 && !CRendererRH::FadingPass )
             {
                 m_aAlphaMeshList.Push( { entryData, ltm, (int)i, 0, atomic } );
                 continue;

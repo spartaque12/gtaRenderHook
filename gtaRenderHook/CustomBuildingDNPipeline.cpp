@@ -182,7 +182,10 @@ void CCustomBuildingDNPipeline::Render( RwResEntry *repEntry, void *object,
             g_pStateMgr->SetAlphaBlendEnable( bAlphaEnable > 0 );
         else
         {
-            if ( bAlphaEnable > 0 && !dithering )
+            // A fading entity (LOD cross-fade) gets its fade through the material alpha, which the game restores right
+            // after drawing it: on the forward alpha list it would be drawn fully opaque, and lit by the forward shader
+            // instead of the deferred one, so distant LODs popped in dark. Dither it into the G-buffer instead.
+            if ( bAlphaEnable > 0 && !dithering && !CRendererRH::FadingPass )
             {
                 m_aAlphaMeshList.Push(
                     {entryData, ltm, (int)i, dualPass ? ALPHA_MESH_DUAL_PASS : 0, atomic} );
