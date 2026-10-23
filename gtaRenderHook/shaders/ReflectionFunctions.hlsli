@@ -22,6 +22,7 @@ float3 SSR(Texture2D ScreenTexture, Texture2D NormalDepth,
     float StepScaling = 1.0f;
     Fallback = 0.0;
     float found = 1.0f;
+    bool SelfHit = false;
     for (int i = 0; i < SSR_SAMPLE_COUNT; i++)
     {
         HitPointWorldPos = WorldPos + ReflectDir * L;
@@ -43,19 +44,17 @@ float3 SSR(Texture2D ScreenTexture, Texture2D NormalDepth,
 
         float3 RestoredWorldPos = DepthToWorldPos(ViewZ, TexelUV).xyz;
 
-        L = length(WorldPos - RestoredWorldPos);
-        if (L < fSSRStep * 1.5f)
-        {
-            found = 0.0f;
-            break;
-        }
-       /* if (abs(ViewZ - ClipSpacePos.z) < 0.000001f)
-        {
-            Fallback = 1.0;
-            return float3(0, 0, 0);
-        }*/
-        /*L+=fStep;
-        fStep*=fStepScaling;*/
+        float NewL = length(WorldPos - RestoredWorldPos);
+        // landing next to the start point means the sample hit the reflecting surface itself (a reflected ray
+        // cannot go back into it). Which samples do that depends on the sub-pixel position, so with the TAA
+        // jitter whole surfaces gave up on some frames and flickered -> step further along the ray instead
+        SelfHit = NewL < fSSRStep * 1.5f;
+        L = SelfHit ? L + fSSRStep : NewL;
+    }
+    if (SelfHit)
+    {
+        // never got clear of the surface: use the fallback reflection
+        found = 0.0f;
     }
     float Error0 = saturate(max(L - 0.011, 0) / 0.044);
     float ScreenEdgeBlend = 0.03;
