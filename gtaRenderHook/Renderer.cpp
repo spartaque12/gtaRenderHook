@@ -957,6 +957,47 @@ void CRendererRH::ScanBigBuildingList( int x, int y )
 
 }
 
+// Big buildings (LODs) beyond the sector ring around the camera: a tall building towards a low sun shades the scene from
+// hundreds of metres away, but it was only a shadow caster while it was on screen. Scan the LOD sectors that reach into
+// a cascade's light volume. Entities already scanned this frame (visible ones) keep the scan code and are skipped; nearer
+// than the ring, the buildings themselves cast instead of their LODs.
+void CRendererRH::ScanBigBuildingsForShadowCasters( float sectorRingRadius )
+{
+    const int lodSectorRange = 3; // 200 m sectors: about 700 m around the camera
+    const int camSectorX = (int)floorf( ms_vecCameraPosition.x / 200.0f + 15.0f );
+    const int camSectorY = (int)floorf( ms_vecCameraPosition.y / 200.0f + 15.0f );
+    const float minDistSq = sectorRingRadius * sectorRingRadius;
+    for ( int x = camSectorX - lodSectorRange; x <= camSectorX + lodSectorRange; x++ )
+    {
+        for ( int y = camSectorY - lodSectorRange; y <= camSectorY + lodSectorRange; y++ )
+        {
+            if ( x < 0 || y < 0 || x >= 30 || y >= 30 )
+                continue;
+            const float minX = ( x - 15 ) * 200.0f;
+            const float minY = ( y - 15 ) * 200.0f;
+            RW::BBox sectorBBox = { { minX, minY, -3000 }, { minX + 200.0f, minY + 200.0f, 3000 } };
+            bool isInsideLightBBox = false;
+            for ( int i = 0; i < gShadowSettings.ShadowCascadeCount && !isInsideLightBBox; i++ )
+                isInsideLightBBox = IsAABBInsideBoundingVolume( ms_aShadowCasterBoundingPlanes[i], 5, sectorBBox );
+            if ( !isInsideLightBBox )
+                continue;
+            for ( auto current = GetLodPtrList( x, y )->GetNode(); current != nullptr; current = current->pNext )
+            {
+                auto entity = (CEntity*)current->pItem;
+                if ( entity->m_nScanCode == CWorld__ms_nCurrentScanCode )
+                    continue;
+                entity->m_nScanCode = CWorld__ms_nCurrentScanCode;
+                if ( !entity->m_bIsVisible || entity->m_pRwObject == nullptr )
+                    continue;
+                const CVector d = entity->GetPosition() - ms_vecCameraPosition;
+                if ( d.x * d.x + d.y * d.y < minDistSq )
+                    continue;
+                AddEntityToShadowCastersIfNeeded( entity, true );
+            }
+        }
+    }
+}
+
 void CRendererRH::ScanSectorListForReflections( int x, int y )
 {
     CSector*	  sector = GetSector( x, y );
@@ -1391,6 +1432,7 @@ void CRendererRH::ScanWorld()
 
         }
     }
+    ScanBigBuildingsForShadowCasters( sectorCount * 50.0f + 25.0f );
     /*for (size_t i = 0; i < gShadowSettings.MaxSectorsAroundPlayer * 2 - 1; i++)
     {
         tt[i].join();
