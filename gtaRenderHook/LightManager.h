@@ -12,7 +12,7 @@ struct CLight
 };
 // nearest lights used per frame; must match aDynamicLights in Deferred.hlsl. With 16, lamps further down a street
 // were dropped as soon as traffic lights, signs and cars nearby took the slots
-constexpr int MAX_DYNAMIC_LIGHTS = 128;
+constexpr int MAX_DYNAMIC_LIGHTS = 32;
 struct LightsCB
 {
     CLight m_aLights[MAX_DYNAMIC_LIGHTS];

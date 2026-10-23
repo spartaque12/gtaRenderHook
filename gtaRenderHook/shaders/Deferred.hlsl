@@ -36,7 +36,7 @@ struct Light
 */
 cbuffer LightBuffer : register(b10)
 {
-    Light aDynamicLights[128]; // MAX_DYNAMIC_LIGHTS in LightManager.h
+    Light aDynamicLights[32]; // MAX_DYNAMIC_LIGHTS in LightManager.h
 };
 struct VS_QUAD_IN
 {
