@@ -41,7 +41,8 @@ bool CLightManager::AddLight( const CLight& light )
 
 void CLightManager::SortByDistance( const RwV3d& from )
 {
-    sort( &m_aLights[0], &m_aLights[1023], [&] ( const CLight &a, const CLight &b )
+    // only this frame's lights: the rest of the array holds stale lights from earlier frames
+    sort( &m_aLights[0], &m_aLights[m_nLightCount], [&] ( const CLight &a, const CLight &b )
     {
         return ( rwV3D_Dist( a.m_vPos, from ) < rwV3D_Dist( b.m_vPos, from ) );
     } );
@@ -49,11 +50,11 @@ void CLightManager::SortByDistance( const RwV3d& from )
 
 void CLightManager::Update()
 {
-    for ( auto i = 0; i < 16; i++ )
+    for ( auto i = 0; i < MAX_DYNAMIC_LIGHTS; i++ )
         m_pLightBuffer->data.m_aLights[i] = m_aLights[i];
 
     m_pLightBuffer->Update();
-    g_pStateMgr->SetLightCount( min( m_nLightCount, 16 ) );
+    g_pStateMgr->SetLightCount( min( m_nLightCount, MAX_DYNAMIC_LIGHTS ) );
 }
 
 CD3D1XConstantBuffer<LightsCB> * CLightManager::GetBuffer()

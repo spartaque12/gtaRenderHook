@@ -36,7 +36,7 @@ struct Light
 */
 cbuffer LightBuffer : register(b10)
 {
-    Light aDynamicLights[16];
+    Light aDynamicLights[64]; // MAX_DYNAMIC_LIGHTS in LightManager.h
 };
 struct VS_QUAD_IN
 {
@@ -151,6 +151,9 @@ float4 PointLightingPS(PS_QUAD_IN i) : SV_Target
 	{
         float3 LightDir = -normalize(WorldPos.xyz - aDynamicLights[i].vPosition.xyz);
         float LightDistance = length(WorldPos.xyz - aDynamicLights[i].vPosition.xyz);
+        // out of reach adds nothing; skip the lighting maths (most of the lights only touch a small part of the screen)
+        if (LightDistance >= aDynamicLights[i].fRange)
+            continue;
 
         float DiffuseTerm, SpecularTerm;
         float3 LightColor = aDynamicLights[i].cColor;
