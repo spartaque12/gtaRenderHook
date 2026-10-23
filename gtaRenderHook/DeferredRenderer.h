@@ -17,7 +17,9 @@ struct CBDeferredRendering
     // UV offset from this frame's jitter to the previous frame's: SSR samples the previous frame
     float SSRPrevFrameOffsetX;
     float SSRPrevFrameOffsetY;
-    float __pad[2];
+    // this frame's jitter as a uv offset: SSR reads the G-buffer at the unjittered pixel centre
+    float SSRJitterOffsetX;
+    float SSRJitterOffsetY;
 };
 class CDeferredRenderer
 {

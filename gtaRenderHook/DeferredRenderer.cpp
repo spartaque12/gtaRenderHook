@@ -167,6 +167,8 @@ void CDeferredRenderer::RenderOutput()
         0.5f * CTemporalAA::GetJitterDeltaX();
     m_pDeferredBuffer->data.SSRPrevFrameOffsetY =
         -0.5f * CTemporalAA::GetJitterDeltaY();
+    m_pDeferredBuffer->data.SSRJitterOffsetX = 0.5f * CTemporalAA::GetJitterX();
+    m_pDeferredBuffer->data.SSRJitterOffsetY = -0.5f * CTemporalAA::GetJitterY();
     m_pDeferredBuffer->Update();
     g_pStateMgr->SetConstantBufferPS( m_pDeferredBuffer, 6 );
     CAmbientOcclusion::RenderAO( m_aDeferredRasters[1] );

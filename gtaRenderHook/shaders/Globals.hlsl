@@ -83,7 +83,7 @@ cbuffer DeferredRendering : register(b6)
     float fMaxShadowBlur;
     float fMinShadowBlur;
     float2 vSSRPrevFrameOffset; // uv offset from this frame's jitter to the previous frame's
-    float2 __padSSR;
+    float2 vSSRJitterOffset;    // this frame's jitter as a uv offset (reflection pass reads the unjittered pixel centre)
 }
 cbuffer VolumetricLighting : register(b7)
 {

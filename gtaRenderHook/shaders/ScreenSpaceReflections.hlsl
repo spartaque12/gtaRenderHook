@@ -122,14 +122,16 @@ float rand_1_07(in float2 uv)
 //--------------------------------------------------------------------------------------
 float4 ReflectionPassPS(PSInput_Quad input) : SV_Target
 {
-    float4 NormalSpec = txGB1.Sample(samLinear, input.texCoordOut.xy);
+    // the G-buffer is jittered for TAA; sample it at the unjittered centre so hits do not change every frame
+    float2 uv = input.texCoordOut.xy + vSSRJitterOffset;
+    float4 NormalSpec = txGB1.Sample(samLinear, uv);
     float ViewZ = DecodeFloatRG(NormalSpec.zw);
     ViewZ = ViewZ <= 0 ? fFarClip : ViewZ;
-    float3 cameraSpacePos = DepthToViewPos(ViewZ, input.texCoordOut.xy).xyz;
-    float3 worldSpacePos = DepthToWorldPos(ViewZ, input.texCoordOut.xy).xyz;
+    float3 cameraSpacePos = DepthToViewPos(ViewZ, uv).xyz;
+    float3 worldSpacePos = DepthToWorldPos(ViewZ, uv).xyz;
     float3 NormalsVS = DecodeNormals(NormalSpec.xy);
     NormalsVS = mul(float4(NormalsVS, 0.0f), mViewInv).rgb;
-    float2 Parameters = txGB2.Sample(samLinear, input.texCoordOut.xy).xy;
+    float2 Parameters = txGB2.Sample(samLinear, uv).xy;
     float Roughness = 1 - Parameters.y;
 
     const float3 ViewPos = mViewInv[3].xyz;
