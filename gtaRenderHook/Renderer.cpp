@@ -959,11 +959,10 @@ void CRendererRH::ScanBigBuildingList( int x, int y )
 
 }
 
-// Big buildings (LODs) beyond the sector ring around the camera: a tall building towards a low sun shades the scene from
-// hundreds of metres away, but it was only a shadow caster while it was on screen. Scan the LOD sectors that reach into
-// a cascade's light volume. Entities already scanned this frame (visible ones) keep the scan code and are skipped; nearer
-// than the ring, the buildings themselves cast instead of their LODs.
-void CRendererRH::ScanBigBuildingsForShadowCasters( float sectorRingRadius )
+// Big buildings (LODs) as shadow casters: a tall building towards a low sun shades the scene from hundreds of metres away,
+// but it was only a shadow caster while it was on screen (off screen the game drops the building's own instance too).
+// Scan the LOD sectors that reach into a cascade's light volume and add the LODs that aren't casting yet.
+void CRendererRH::ScanBigBuildingsForShadowCasters()
 {
     // ScanBigBuildingList stamps every big building of the sectors it scans, also the ones it doesn't draw (off screen),
     // so the scan code can't tell which ones already cast: look at the caster lists instead.
@@ -980,7 +979,6 @@ void CRendererRH::ScanBigBuildingsForShadowCasters( float sectorRingRadius )
     const int lodSectorRange = 3; // 200 m sectors: about 700 m around the camera
     const int camSectorX = (int)floorf( ms_vecCameraPosition.x / 200.0f + 15.0f );
     const int camSectorY = (int)floorf( ms_vecCameraPosition.y / 200.0f + 15.0f );
-    const float minDistSq = sectorRingRadius * sectorRingRadius;
     for ( int x = camSectorX - lodSectorRange; x <= camSectorX + lodSectorRange; x++ )
     {
         for ( int y = camSectorY - lodSectorRange; y <= camSectorY + lodSectorRange; y++ )
@@ -1005,13 +1003,6 @@ void CRendererRH::ScanBigBuildingsForShadowCasters( float sectorRingRadius )
                 {
                     if ( watched )
                         fprintf( dbg, " -> skipped\n" );
-                    continue;
-                }
-                const CVector d = entity->GetPosition() - ms_vecCameraPosition;
-                if ( d.x * d.x + d.y * d.y < minDistSq )
-                {
-                    if ( watched )
-                        fprintf( dbg, " -> inside ring\n" );
                     continue;
                 }
                 // off screen the game deletes the instance; recreate it while the model is loaded
@@ -1485,7 +1476,7 @@ void CRendererRH::ScanWorld()
 
         }
     }
-    ScanBigBuildingsForShadowCasters( sectorCount * 50.0f + 25.0f );
+    ScanBigBuildingsForShadowCasters();
     /*for (size_t i = 0; i < gShadowSettings.MaxSectorsAroundPlayer * 2 - 1; i++)
     {
         tt[i].join();
