@@ -987,11 +987,20 @@ void CRendererRH::ScanBigBuildingsForShadowCasters( float sectorRingRadius )
                 if ( entity->m_nScanCode == CWorld__ms_nCurrentScanCode )
                     continue;
                 entity->m_nScanCode = CWorld__ms_nCurrentScanCode;
-                if ( !entity->m_bIsVisible || entity->m_pRwObject == nullptr )
+                if ( !entity->m_bIsVisible || entity->m_nAreaCode != CGame::currArea )
                     continue;
                 const CVector d = entity->GetPosition() - ms_vecCameraPosition;
                 if ( d.x * d.x + d.y * d.y < minDistSq )
                     continue;
+                // off screen the game deletes the instance; recreate it while the model is loaded
+                if ( entity->m_pRwObject == nullptr )
+                {
+                    if ( CModelInfo::ms_modelInfoPtrs[entity->m_nModelIndex]->m_pRwObject == nullptr )
+                        continue;
+                    entity->CreateRwObject();
+                    if ( entity->m_pRwObject == nullptr )
+                        continue;
+                }
                 AddEntityToShadowCastersIfNeeded( entity, true );
             }
         }

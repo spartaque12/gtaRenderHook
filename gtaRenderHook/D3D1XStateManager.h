@@ -72,6 +72,7 @@ public:
         Changes current fill mode.
     */
     void SetFillMode( D3D11_FILL_MODE mode );
+    void SetDepthClipEnable( bool enable );
     /*!
         Enables or disables stencil buffer.
     */
