@@ -22,6 +22,8 @@ TAASettingsBlock gTAASettingsBlock;
 bool CTemporalAA::m_bFirstTimeRender = true;
 float CTemporalAA::m_fJitterX = 0.0f;
 float CTemporalAA::m_fJitterY = 0.0f;
+float CTemporalAA::m_fPrevJitterX = 0.0f;
+float CTemporalAA::m_fPrevJitterY = 0.0f;
 RwGraphicsMatrix CTemporalAA::m_mView = {};
 RwGraphicsMatrix CTemporalAA::m_mProjection = {};
 static RHTemporalAAHandler g_externalTAA = nullptr;
@@ -150,6 +152,8 @@ void CTemporalAA::JitterProjMatrix()
     auto camera = Scene.m_pRwCamera;
     m_mView       = *(RwGraphicsMatrix *)&RwD3D9D3D9ViewTransform;
     m_mProjection = *projTransformRef;
+    m_fPrevJitterX = m_fJitterX;
+    m_fPrevJitterY = m_fJitterY;
     m_fJitterX = SampleX * Scale;
     m_fJitterY = SampleY * Scale;
     projTransformRef->m[2].x += m_fJitterX;

@@ -59,6 +59,6 @@ float3 SSR(Texture2D ScreenTexture, Texture2D NormalDepth,
                    saturate(max(1 - ClipSpacePos.x + ScreenEdgeBlend, 0) / ScreenEdgeBlend * 0.25) *
                    saturate(max(1 - ClipSpacePos.y + ScreenEdgeBlend, 0) / ScreenEdgeBlend * 0.25);
     Fallback = 1 - Error0 * Error1 * found;
-    float3 refsample = ScreenTexture.SampleLevel(Sampler, ClipSpacePos.xy, 0).rgb;
+    float3 refsample = ScreenTexture.SampleLevel(Sampler, ClipSpacePos.xy + vSSRPrevFrameOffset, 0).rgb;
     return refsample; //* error0 * error1;
 }
