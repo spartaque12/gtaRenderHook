@@ -34,14 +34,9 @@ float3 SSR(Texture2D ScreenTexture, Texture2D NormalDepth,
         }
         float ViewZ;
         float3 Normal;
-        // depth is packed into two 8-bit channels: a filtered read between texels decodes to garbage, and with
-        // the TAA jitter where a ray lands between texels changes every frame -> read at the texel centre
-        float2 GBufferSize;
-        NormalDepth.GetDimensions(GBufferSize.x, GBufferSize.y);
-        float2 TexelUV = (floor(ClipSpacePos.xy * GBufferSize) + 0.5f) / GBufferSize;
-        GetNormalsAndDepth(NormalDepth, Sampler, TexelUV, ViewZ, Normal);
+        GetNormalsAndDepth(NormalDepth, Sampler, ClipSpacePos.xy, ViewZ, Normal);
 
-        float3 RestoredWorldPos = DepthToWorldPos(ViewZ, TexelUV).xyz;
+        float3 RestoredWorldPos = DepthToWorldPos(ViewZ, ClipSpacePos.xy).xyz;
 
         L = length(WorldPos - RestoredWorldPos);
         if (L < fSSRStep * 1.5f)
