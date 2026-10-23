@@ -994,12 +994,13 @@ void CRendererRH::ScanBigBuildingsForShadowCasters()
             for ( auto current = GetLodPtrList( x, y )->GetNode(); current != nullptr; current = current->pNext )
             {
                 auto entity = (CEntity*)current->pItem;
-                const bool watched = dbgNow && ( entity->m_nModelIndex == 4579 || entity->m_nModelIndex == 4628 );
+                const bool watched = dbgNow && ( entity->m_nModelIndex == 4579 || entity->m_nModelIndex == 4628 || entity->m_nModelIndex == 4577 );
                 if ( watched )
                     fprintf( dbg, "frame %u model %d sector %d,%d inLightVolume %d alreadyCaster %d visibleFlag %d area %d rw %p",
                              dbgFrame, entity->m_nModelIndex, x, y, isInsideLightBBox, casters.count( entity ) != 0,
                              entity->m_bIsVisible, entity->m_nAreaCode, entity->m_pRwObject );
-                if ( !isInsideLightBBox || casters.count( entity ) != 0 || !entity->m_bIsVisible || entity->m_nAreaCode != CGame::currArea )
+                if ( !isInsideLightBBox || casters.count( entity ) != 0 || !entity->m_bIsVisible ||
+                     ( entity->m_nAreaCode != CGame::currArea && entity->m_nAreaCode != 13 ) ) // 13: every area
                 {
                     if ( watched )
                         fprintf( dbg, " -> skipped\n" );
