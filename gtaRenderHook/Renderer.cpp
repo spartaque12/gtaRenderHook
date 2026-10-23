@@ -236,6 +236,17 @@ char CRendererRH::AddEntityToShadowCasterList( CEntity * entity, float renderDis
 {
     //if (ms_aVisibleShadowCasters[shadowCascade].size() > 1000)
     //	return true;
+    // Off screen the game deletes a building's instance; a caster without one isn't drawn, so recreate it while the
+    // model is loaded (buildings only: peds and vehicles manage their own).
+    if ( entity->m_pRwObject == nullptr )
+    {
+        if ( entity->m_nType != eEntityType::ENTITY_TYPE_BUILDING ||
+             CModelInfo::ms_modelInfoPtrs[entity->m_nModelIndex]->m_pRwObject == nullptr )
+            return false;
+        entity->CreateRwObject();
+        if ( entity->m_pRwObject == nullptr )
+            return false;
+    }
     ms_aVisibleShadowCasters[shadowCascade].push_back( entity );
     return true;
 }
