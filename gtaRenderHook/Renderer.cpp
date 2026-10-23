@@ -22,6 +22,8 @@
 #include "D3D1XStateManager.h"
 #include "SAIdleHook.h"
 #include "DebugBBox.h"
+#include <unordered_set>
+#include <cstdio>
 bool		&CRendererRH::ms_bRenderTunnels = *(bool*)0xB745C0;
 bool		&CRendererRH::ms_bRenderOutsideTunnels = *(bool*)0xB745C1;
 bool&		CRendererRH::ms_bInTheSky = *(bool*)0xB76851;
@@ -963,6 +965,18 @@ void CRendererRH::ScanBigBuildingList( int x, int y )
 // than the ring, the buildings themselves cast instead of their LODs.
 void CRendererRH::ScanBigBuildingsForShadowCasters( float sectorRingRadius )
 {
+    // ScanBigBuildingList stamps every big building of the sectors it scans, also the ones it doesn't draw (off screen),
+    // so the scan code can't tell which ones already cast: look at the caster lists instead.
+    std::unordered_set<CEntity*> casters;
+    for ( int i = 0; i < 4; i++ )
+        casters.insert( ms_aVisibleShadowCasters[i].begin(), ms_aVisibleShadowCasters[i].end() );
+
+    // TEMPORARY debug: what happens to the two towers that went missing from the shadows (LODkyscrap2_LAn,
+    // LODstolenbuilds11)
+    static FILE* dbg = fopen( "rh_shadow_towers.log", "w" );
+    static unsigned dbgFrame = 0;
+    const bool dbgNow = dbg && ++dbgFrame % 60 == 0;
+
     const int lodSectorRange = 3; // 200 m sectors: about 700 m around the camera
     const int camSectorX = (int)floorf( ms_vecCameraPosition.x / 200.0f + 15.0f );
     const int camSectorY = (int)floorf( ms_vecCameraPosition.y / 200.0f + 15.0f );
@@ -979,31 +993,61 @@ void CRendererRH::ScanBigBuildingsForShadowCasters( float sectorRingRadius )
             bool isInsideLightBBox = false;
             for ( int i = 0; i < gShadowSettings.ShadowCascadeCount && !isInsideLightBBox; i++ )
                 isInsideLightBBox = IsAABBInsideBoundingVolume( ms_aShadowCasterBoundingPlanes[i], 5, sectorBBox );
-            if ( !isInsideLightBBox )
-                continue;
             for ( auto current = GetLodPtrList( x, y )->GetNode(); current != nullptr; current = current->pNext )
             {
                 auto entity = (CEntity*)current->pItem;
-                if ( entity->m_nScanCode == CWorld__ms_nCurrentScanCode )
+                const bool watched = dbgNow && ( entity->m_nModelIndex == 4579 || entity->m_nModelIndex == 4628 );
+                if ( watched )
+                    fprintf( dbg, "frame %u model %d sector %d,%d inLightVolume %d alreadyCaster %d visibleFlag %d area %d rw %p",
+                             dbgFrame, entity->m_nModelIndex, x, y, isInsideLightBBox, casters.count( entity ) != 0,
+                             entity->m_bIsVisible, entity->m_nAreaCode, entity->m_pRwObject );
+                if ( !isInsideLightBBox || casters.count( entity ) != 0 || !entity->m_bIsVisible || entity->m_nAreaCode != CGame::currArea )
+                {
+                    if ( watched )
+                        fprintf( dbg, " -> skipped\n" );
                     continue;
-                entity->m_nScanCode = CWorld__ms_nCurrentScanCode;
-                if ( !entity->m_bIsVisible || entity->m_nAreaCode != CGame::currArea )
-                    continue;
+                }
                 const CVector d = entity->GetPosition() - ms_vecCameraPosition;
                 if ( d.x * d.x + d.y * d.y < minDistSq )
+                {
+                    if ( watched )
+                        fprintf( dbg, " -> inside ring\n" );
                     continue;
+                }
                 // off screen the game deletes the instance; recreate it while the model is loaded
                 if ( entity->m_pRwObject == nullptr )
                 {
                     if ( CModelInfo::ms_modelInfoPtrs[entity->m_nModelIndex]->m_pRwObject == nullptr )
+                    {
+                        if ( watched )
+                            fprintf( dbg, " -> model not loaded\n" );
                         continue;
+                    }
                     entity->CreateRwObject();
                     if ( entity->m_pRwObject == nullptr )
                         continue;
                 }
+                size_t before[4];
+                for ( int i = 0; i < 4; i++ )
+                    before[i] = ms_aVisibleShadowCasters[i].size();
                 AddEntityToShadowCastersIfNeeded( entity, true );
+                if ( watched )
+                {
+                    fprintf( dbg, " -> added to cascades" );
+                    for ( int i = 0; i < 4; i++ )
+                        if ( ms_aVisibleShadowCasters[i].size() > before[i] )
+                            fprintf( dbg, " %d", i );
+                    fprintf( dbg, "\n" );
+                }
             }
         }
+    }
+    if ( dbgNow )
+    {
+        fprintf( dbg, "frame %u cam %.0f %.0f %.0f casters %zu %zu %zu %zu\n", dbgFrame, ms_vecCameraPosition.x, ms_vecCameraPosition.y,
+                 ms_vecCameraPosition.z, ms_aVisibleShadowCasters[0].size(), ms_aVisibleShadowCasters[1].size(),
+                 ms_aVisibleShadowCasters[2].size(), ms_aVisibleShadowCasters[3].size() );
+        fflush( dbg );
     }
 }
 
