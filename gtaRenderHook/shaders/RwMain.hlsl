@@ -23,6 +23,9 @@ struct PS_MAIN_IN
 	float3 vNormal		: NORMAL;
 	float2 vTexCoord		: TEXCOORD0;
 	float  fViewZ		: TEXCOORD1;
+
+	float4 vCurClip : TEXCOORD2;  // object motion vectors: this frame without jitter
+	float4 vPrevClip : TEXCOORD3; // and last frame
 };
 
 //--------------------------------------------------------------------------------------
@@ -32,10 +35,13 @@ PS_MAIN_IN VS(VS_MAIN_IN i)
 {
     PS_MAIN_IN o;
 	float4 	outPos 	= float4( i.vPosition,1.0);// transform to screen space
+    float4 MotionLocalPos = outPos; // object motion vectors
 			outPos 	= mul( outPos, mWorld );
 			outPos	= mul( outPos, mView );
     o.fViewZ        = outPos.z;
     o.vPosition 	= mul( outPos, mProjection );
+    o.vCurClip  = RemoveJitter(o.vPosition);
+    o.vPrevClip = mul(mul(MotionLocalPos, mWorldPrev), mPrevViewProjection);
 	o.vNormal   	= mul( i.vInNormal, (float3x3)mWorld);
     o.vTexCoord     = i.vTexCoord;
 	o.vColor		= i.vInColor;
@@ -65,5 +71,6 @@ PS_DEFERRED_OUT DeferredPS(PS_MAIN_IN i)
     if (baseColor.a * i.vColor.w < 0.3)
         discard;
     FillGBuffer(Out, baseColor, i.vNormal, i.fViewZ, float4(fSpecularIntensity, fGlossiness, 0, 0));
+    Out.vObjectMotion = ObjectMotion(i.vCurClip, i.vPrevClip);
     return Out;
 }
