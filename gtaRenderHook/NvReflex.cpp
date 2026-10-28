@@ -58,7 +58,7 @@ bool Init()
     g_setLatencyMarker = query ? reinterpret_cast<SetLatencyMarkerFn>( query( 0xd9984c05 ) ) : nullptr;
     if ( !init || !g_setSleepMode || !g_sleep || !g_setLatencyMarker || init() != 0 )
     {
-        g_pDebug->printError( "Reflex: NVAPI not available (not an NVIDIA GPU or driver too old)" );
+        g_pDebug->printMsg( "Reflex: NVAPI not available (not an NVIDIA GPU or driver too old)", 0 ); // printError throws
         return false;
     }
     return true;
@@ -73,7 +73,7 @@ bool ApplySleepMode( bool boost )
     params.bUseMarkersToOptimize = 1;
     const int status = g_setSleepMode( GET_D3D_DEVICE, &params );
     if ( status != 0 )
-        g_pDebug->printError( "Reflex: NvAPI_D3D_SetSleepMode failed (" + std::to_string( status ) + ")" );
+        g_pDebug->printMsg( "Reflex: NvAPI_D3D_SetSleepMode failed (" + std::to_string( status ) + ")", 0 );
     g_boost = boost;
     return status == 0;
 }

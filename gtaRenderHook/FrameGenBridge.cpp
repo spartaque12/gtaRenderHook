@@ -128,7 +128,8 @@ template <class T> void Release( T *&p )
 
 void Break( const char *why )
 {
-    g_pDebug->printError( std::string( "Frame generation bridge disabled: " ) + why );
+    // printMsg, not printError: printError throws, which crashed the game instead of falling back to its own output
+    g_pDebug->printMsg( std::string( "Frame generation bridge disabled: " ) + why, 0 );
     g_broken = true;
 }
 
@@ -182,8 +183,8 @@ bool CreateMotionPass()
                          D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &ps, &errors );
     if ( errors )
     {
-        g_pDebug->printError( std::string( "Frame generation motion shader: " ) +
-                              static_cast<const char *>( errors->GetBufferPointer() ) );
+        g_pDebug->printMsg( std::string( "Frame generation motion shader: " ) +
+                                static_cast<const char *>( errors->GetBufferPointer() ), 0 );
         errors->Release();
     }
     if ( SUCCEEDED( hr ) )
@@ -535,7 +536,7 @@ void CFrameGenBridge::FrameStart()
         PushMarker( rhfg::MarkerSleep );
         if ( WaitForSingleObject( g_sleptEvent, 100 ) != WAIT_OBJECT_0 )
         {
-            g_pDebug->printError( "Frame generation bridge: Reflex sleep not answered, Reflex off for this session" );
+            g_pDebug->printMsg( "Frame generation bridge: Reflex sleep not answered, Reflex off for this session", 0 );
             g_reflexOff          = true;
             g_shared->gameMarkers = 0;
             return;
