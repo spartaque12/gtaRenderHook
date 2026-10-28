@@ -26,6 +26,8 @@
 #include <game_sa\CFont.h>
 #include "HudLayer.h"
 #include "FrameGenBridge.h"
+#include "FrameGenShared.h"
+#include "NvReflex.h"
 #include <game_sa\CWorld.h>
 #include <game_sa\CScene.h>
 #include <game_sa\CClock.h>
@@ -93,6 +95,10 @@ void CSAIdleHook::Idle( void *Data )
         RH_PROFILE_ZONE( ZoneReloads );
         SettingsHolder::Instance()->ReloadShadersIfRequired();
     }
+    // Reflex sleeps here, before the frame's input is read, and marks the simulation start: NVIDIA Reflex on our own
+    // device (NvReflex), and the frame generation bridge's markers (it sleeps only without NvReflex)
+    CNvReflex::FrameStart();
+    CFrameGenBridge::FrameStart();
     // Update timers
     {
         RH_PROFILE_ZONE( ZoneTimeUpdate );
@@ -107,6 +113,8 @@ void CSAIdleHook::Idle( void *Data )
         RH_PROFILE_ZONE( ZoneLightUpdate );
         LightUpdate();
     }
+    CNvReflex::SetMarker( CNvReflex::SimulationEnd );
+    CFrameGenBridge::Marker( rhfg::MarkerSimulationEnd );
 
     // reload textures if required
     FrameProfiler::BeginZone( FrameProfiler::ZoneReloads );    g_pDeferredRenderer->QueueTextureReload();
@@ -135,6 +143,8 @@ void CSAIdleHook::Idle( void *Data )
 
     if ( !Data )
         return;
+    CNvReflex::SetMarker( CNvReflex::RenderSubmitStart );
+    CFrameGenBridge::Marker( rhfg::MarkerRenderSubmitStart );
     PrepareRwCamera();
     if ( !RsCameraBeginUpdate( Scene.m_pRwCamera ) )
         return;
@@ -630,7 +640,10 @@ void CSAIdleHook::DoRWStuffEndOfFrame()
     DebugDisplayTextBuffer();
     FlushObrsPrintfs();
     RwCameraEndUpdate( Scene.m_pRwCamera );
+    CNvReflex::SetMarker( CNvReflex::RenderSubmitEnd );
+    CNvReflex::SetMarker( CNvReflex::PresentStart );
     RsCameraShowRaster( Scene.m_pRwCamera );
+    CNvReflex::SetMarker( CNvReflex::PresentEnd );
 }
 
 void CSAIdleHook::PrepareRwCamera()

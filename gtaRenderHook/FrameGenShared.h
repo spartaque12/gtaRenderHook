@@ -7,10 +7,27 @@
 
 namespace rhfg {
 
-const uint32_t kVersion = 2;
+const uint32_t kVersion = 3;
 const uint32_t kSlots   = 3; // shared frame textures, used round-robin
 
 enum : uint32_t { StateStarting, StateReady, StateFailed };
+
+// Reflex events from the game's frame loop, forwarded by the helper to Streamline right away (sl::PCLMarker values,
+// plus MarkerSleep: slReflexSleep, after which the helper sets the "slept" event the game waits for)
+const uint32_t kMarkers = 64;
+enum : uint32_t
+{
+    MarkerSimulationStart    = 0,
+    MarkerSimulationEnd      = 1,
+    MarkerRenderSubmitStart  = 2,
+    MarkerRenderSubmitEnd    = 3,
+    MarkerSleep              = 100,
+};
+struct MarkerEvent
+{
+    uint32_t frameIndex; // the game's frame, the same number the frame is presented under
+    uint32_t marker;
+};
 
 // Camera of the frame in a slot, for frame generation. D3D convention (row vectors, row-major, v * M), without the
 // TAA jitter; prev* is the game's previous frame, which the motion vectors point to.
@@ -46,6 +63,13 @@ struct Shared
     volatile int64_t  publishQpc[kSlots];  // QueryPerformanceCounter when the frame was published
     Camera camera[kSlots];
     volatile uint32_t droppedFrames;       // game: frames skipped because the helper still held every slot
+
+    // Reflex: the game's frame index of the frame in each slot, and the marker queue (game writes head, helper tail)
+    volatile uint32_t slotFrameIndex[kSlots];
+    MarkerEvent markers[kMarkers];
+    volatile uint32_t markerHead, markerTail;
+    volatile uint32_t reflexReady;   // helper: its marker thread and Streamline's Reflex are up
+    volatile uint32_t gameMarkers;   // game: sends its own markers (otherwise the helper marks frames on arrival)
 };
 
 inline void Names( uint32_t pid, char *mapping, char *frameEvent, char *configEvent, size_t size )
@@ -53,6 +77,12 @@ inline void Names( uint32_t pid, char *mapping, char *frameEvent, char *configEv
     snprintf( mapping, size, "Local\\RHFG_%u_map", pid );
     snprintf( frameEvent, size, "Local\\RHFG_%u_frame", pid );
     snprintf( configEvent, size, "Local\\RHFG_%u_config", pid );
+}
+
+inline void ReflexNames( uint32_t pid, char *markerEvent, char *sleptEvent, size_t size )
+{
+    snprintf( markerEvent, size, "Local\\RHFG_%u_marker", pid );
+    snprintf( sleptEvent, size, "Local\\RHFG_%u_slept", pid );
 }
 
 } // namespace rhfg

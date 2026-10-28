@@ -263,6 +263,7 @@
     <ClInclude Include="HudLayer.h" />
     <ClInclude Include="FrameGenBridge.h" />
     <ClInclude Include="FrameGenShared.h" />
+    <ClInclude Include="NvReflex.h" />
     <ClInclude Include="gta_sa_ptrs.h" />
     <ClInclude Include="HDRTonemapping.h" />
     <ClInclude Include="LightManager.h" />
@@ -365,6 +366,7 @@
     <ClCompile Include="FullscreenQuad.cpp" />
     <ClCompile Include="HudLayer.cpp" />
     <ClCompile Include="FrameGenBridge.cpp" />
+    <ClCompile Include="NvReflex.cpp" />
     <ClCompile Include="HDRTonemapping.cpp" />
     <ClCompile Include="LightManager.cpp" />
     <ClCompile Include="PBSMaterial.cpp" />

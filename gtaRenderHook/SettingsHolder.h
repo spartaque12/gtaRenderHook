@@ -160,7 +160,12 @@ public:
         m_aFields["HudLayerView"] = new IntSField( "HudLayerView", false, false, false, m_sName, 0, 0, 2 );
         // frame generation bridge, step 1 (CFrameGenBridge): frames presented by RHFrameGen64.exe over the game window
         m_aFields["FrameGenBridge"] = new ToggleSField( "FrameGenBridge", true, false, false, m_sName, false );
+        // Reflex through the bridge: sleep at frame start as Reflex decides (off = markers only)
+        m_aFields["FrameGenReflexSleep"] = new ToggleSField( "FrameGenReflexSleep", true, false, false, m_sName, true );
         m_aFields["FrameGenBridgeVSync"] = new IntSField( "FrameGenBridgeVSync", true, false, false, m_sName, 0, 0, 1 );
+        // NVIDIA Reflex on RenderHook's device (CNvReflex); Boost keeps GPU clocks up
+        m_aFields["NvReflex"] = new ToggleSField( "NvReflex", false, false, false, m_sName, false );
+        m_aFields["NvReflexBoost"] = new ToggleSField( "NvReflexBoost", false, false, false, m_sName, false );
         m_aFields["DebugLevel"] = new IntSField( "DebugLevel", true, false, false, m_sName, 0, 0, 2 );
         Reset();
     }

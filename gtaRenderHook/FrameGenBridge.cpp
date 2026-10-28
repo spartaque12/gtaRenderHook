@@ -7,6 +7,7 @@
 #include "RwD3D1XEngine.h"
 #include "SettingsHolder.h"
 #include "TemporalAA.h"
+#include "NvReflex.h"
 #include <game_sa\CScene.h>
 #include <d3d11_4.h>
 #include <d3dcompiler.h>
@@ -103,6 +104,10 @@ DXGI_FORMAT             g_format;
 uint64_t                g_frame;
 Mat                     g_prevView, g_prevProj;
 bool                    g_hasPrev;
+// Reflex: the game's frame index (counted at frame start) and the events of the marker queue
+HANDLE                  g_markerEvent, g_sleptEvent;
+uint32_t                g_simIndex;
+bool                    g_reflexOff;
 
 template <class T> void Release( T *&p )
 {
@@ -213,7 +218,11 @@ bool StartHelper()
                              : nullptr;
     g_frameEvent  = CreateEventA( nullptr, FALSE, FALSE, frameName );
     g_configEvent = CreateEventA( nullptr, FALSE, FALSE, configName );
-    if ( !g_shared || !g_frameEvent || !g_configEvent )
+    char markerName[64], sleptName[64];
+    rhfg::ReflexNames( pid, markerName, sleptName, sizeof markerName );
+    g_markerEvent = CreateEventA( nullptr, FALSE, FALSE, markerName );
+    g_sleptEvent  = CreateEventA( nullptr, FALSE, FALSE, sleptName );
+    if ( !g_shared || !g_frameEvent || !g_configEvent || !g_markerEvent || !g_sleptEvent )
     {
         Break( "could not create shared memory/events" );
         return false;
@@ -434,7 +443,51 @@ void DrawMotionVectors( uint32_t slot )
     g_prevProj = proj;
     g_hasPrev  = true;
 }
+bool ReflexActive()
+{
+    return g_started && !g_broken && !g_reflexOff && g_shared && g_shared->state == rhfg::StateReady &&
+           g_shared->reflexReady && gDebugSettings.GetToggleField( "FrameGenBridge" );
+}
+
+// queued for the helper's marker thread, which passes it to Streamline at once; a full queue drops the marker
+void PushMarker( uint32_t marker )
+{
+    const uint32_t head = g_shared->markerHead;
+    if ( head - g_shared->markerTail >= rhfg::kMarkers )
+        return;
+    g_shared->markers[head % rhfg::kMarkers] = { g_simIndex, marker };
+    _WriteBarrier();
+    g_shared->markerHead = head + 1;
+    SetEvent( g_markerEvent );
+}
 } // namespace
+
+void CFrameGenBridge::FrameStart()
+{
+    if ( !ReflexActive() )
+        return;
+    g_shared->gameMarkers = 1;
+    g_simIndex++;
+    if ( gDebugSettings.GetToggleField( "FrameGenReflexSleep" ) && !CNvReflex::IsActive() ) // NvReflex sleeps on our device
+    {
+        // Reflex decides when this frame should start (before the game reads input); the helper sleeps for us
+        PushMarker( rhfg::MarkerSleep );
+        if ( WaitForSingleObject( g_sleptEvent, 100 ) != WAIT_OBJECT_0 )
+        {
+            g_pDebug->printError( "Frame generation bridge: Reflex sleep not answered, Reflex off for this session" );
+            g_reflexOff          = true;
+            g_shared->gameMarkers = 0;
+            return;
+        }
+    }
+    PushMarker( rhfg::MarkerSimulationStart );
+}
+
+void CFrameGenBridge::Marker( uint32_t marker )
+{
+    if ( ReflexActive() )
+        PushMarker( marker );
+}
 
 void CFrameGenBridge::PublishFrame()
 {
@@ -479,6 +532,8 @@ void CFrameGenBridge::PublishFrame()
     backBuffer->Release();
     g_context->Signal( g_readyFence, next );
     g_context->Flush();
+    g_shared->slotFrameIndex[slot] = g_simIndex; // presented under the game's frame index (Reflex markers)
+    Marker( rhfg::MarkerRenderSubmitEnd );
 
     LARGE_INTEGER now;
     QueryPerformanceCounter( &now );
