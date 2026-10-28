@@ -31,6 +31,8 @@ public:
     void	SetNormalDepthRaster();
     void	SetPreviousFinalRaster();
     void	SetPreviousNonTonemappedFinalRaster();
+    // G-buffer normals and view depth (zw, EncodeFloatRG / fFarClip)
+    RwRaster *GetNormalDepthRaster() const { return m_aDeferredRasters[1]; }
     void	QueueTextureReload();
     CShadowRenderer* m_pShadowRenderer;
     CCubemapReflectionRenderer* m_pReflRenderer;

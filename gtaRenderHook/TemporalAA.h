@@ -30,6 +30,9 @@ public:
     static RwRaster *m_pObjectMotionRaster;
     // an external TAA (e.g. DLAA) replaced RenderHook's last frame: dithered transparency stays visible then
     static bool ExternalTAAActive();
+    // this frame's view and projection without jitter (set by JitterProjMatrix)
+    static const RwGraphicsMatrix &GetView() { return m_mView; }
+    static const RwGraphicsMatrix &GetProjection() { return m_mProjection; }
 
   private:
     static CD3D1XShader * m_pTemporalAA;

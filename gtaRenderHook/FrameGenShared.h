@@ -7,10 +7,20 @@
 
 namespace rhfg {
 
-const uint32_t kVersion = 1;
+const uint32_t kVersion = 2;
 const uint32_t kSlots   = 3; // shared frame textures, used round-robin
 
 enum : uint32_t { StateStarting, StateReady, StateFailed };
+
+// Camera of the frame in a slot, for frame generation. D3D convention (row vectors, row-major, v * M), without the
+// TAA jitter; prev* is the game's previous frame, which the motion vectors point to.
+struct Camera
+{
+    float view[16], proj[16];
+    float prevView[16], prevProj[16];
+    uint32_t reset; // 1: no usable previous frame (first frame, camera cut/teleport)
+    float pad[3];
+};
 
 struct Shared
 {
@@ -24,7 +34,9 @@ struct Shared
 
     // game: set before configGeneration is raised; handles are valid in the helper process
     uint32_t width, height, format; // DXGI_FORMAT of the frames
-    uint64_t hFrame[kSlots];
+    uint64_t hFrame[kSlots];        // final frame, HUD included (what the game would present)
+    uint64_t hDepth[kSlots];        // R32_FLOAT hardware-style depth (0 near .. 1 far/sky), from the camera without jitter
+    uint64_t hMotion[kSlots];       // R16G16_FLOAT motion in pixels, current -> previous frame, camera and objects
     uint64_t hReadyFence;           // game signals frame n when slot n % kSlots holds it
     uint64_t hDoneFence;            // helper signals frame n once it's copied out of its slot
     volatile uint32_t configGeneration;
@@ -32,6 +44,7 @@ struct Shared
     // game, per frame: frame n (1, 2, ...) is in slot n % kSlots, ready on the GPU at hReadyFence >= n
     volatile uint64_t frame;
     volatile int64_t  publishQpc[kSlots];  // QueryPerformanceCounter when the frame was published
+    Camera camera[kSlots];
     volatile uint32_t droppedFrames;       // game: frames skipped because the helper still held every slot
 };
 
