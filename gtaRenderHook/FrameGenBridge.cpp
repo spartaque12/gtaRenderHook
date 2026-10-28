@@ -142,6 +142,7 @@ bool                    g_reflexOff;
 typedef HRESULT( STDMETHODCALLTYPE *PresentFn )( IDXGISwapChain *, UINT, UINT );
 PresentFn               g_present;
 bool                    g_presentHooked, g_frameReady;
+void                    BridgeLog( const char *fmt, ... );
 
 template <class T> void Release( T *&p )
 {
@@ -712,7 +713,7 @@ void CFrameGenBridge::FrameReady()
     // the previous frame still waiting: our hook didn't run (removed by another tool restoring Present's code)
     if ( g_presentHooked && g_frameReady )
     {
-        g_pDebug->printMsg( "Frame generation bridge: Present hook lost, frames handed over before Present", 0 );
+        BridgeLog( "Present hook lost: frames handed over before Present" );
         g_presentHooked = false;
     }
     if ( g_presentHooked )
@@ -724,11 +725,102 @@ void CFrameGenBridge::FrameReady()
     }
 }
 
+namespace
+{
+// RHFrameGen\RHFrameGenBridge.log, always written (RenderHook's own log needs DebugMessaging)
+void BridgeLog( const char *fmt, ... )
+{
+    char path[MAX_PATH];
+    HMODULE self = nullptr;
+    GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                        reinterpret_cast<LPCSTR>( &BridgeLog ), &self );
+    GetModuleFileNameA( self, path, MAX_PATH );
+    if ( char *slash = strrchr( path, '\\' ) )
+        strcpy_s( slash + 1, path + MAX_PATH - slash - 1, "RHFrameGen\\RHFrameGenBridge.log" );
+    static bool first = true;
+    FILE *f = fopen( path, first ? "w" : "a" );
+    first = false;
+    if ( !f )
+        return;
+    va_list a;
+    va_start( a, fmt );
+    vfprintf( f, fmt, a );
+    va_end( a );
+    fputc( '\n', f );
+    fclose( f );
+}
+
+// called from inside DXGI's Present, after every hook chained on it has run
+void __cdecl OnPresentBody( IDXGISwapChain *self )
+{
+    static bool logged;
+    if ( g_frameReady && self == GET_D3D_RENDERER->getSwapChain() )
+    {
+        if ( !logged )
+            BridgeLog( "first frame handed over inside Present" );
+        logged = true;
+        g_frameReady = false;
+        CFrameGenBridge::PublishFrame();
+    }
+}
+
+// Hooks Present's body right after its frame setup (mov edi, edi; push ebp; mov ebp, esp). Hooks on Present replace
+// those first 5 bytes with their jump, and their trampolines run them and jump here: so this runs last, after every
+// overlay, whoever hooked first. The two instructions here (and esp, -8; sub esp, n) move to a stub that calls us first.
+bool HookPresentBody( uint8_t *code )
+{
+    uint8_t *body = code + 5;
+    size_t length;
+    if ( body[0] == 0x83 && body[1] == 0xE4 && body[3] == 0x83 && body[4] == 0xEC )
+        length = 6; // and esp, imm8; sub esp, imm8
+    else if ( body[0] == 0x83 && body[1] == 0xE4 && body[3] == 0x81 && body[4] == 0xEC )
+        length = 9; // and esp, imm8; sub esp, imm32
+    else
+        return false;
+    auto stub = static_cast<uint8_t *>( VirtualAlloc( nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE ) );
+    if ( !stub )
+        return false;
+    uint8_t *p = stub;
+    *p++ = 0x60;                                   // pushad
+    *p++ = 0x9C;                                   // pushfd
+    *p++ = 0xFF; *p++ = 0x75; *p++ = 0x08;         // push dword ptr [ebp + 8]   (the swapchain)
+    *p++ = 0xE8;                                   // call OnPresentBody
+    *reinterpret_cast<int32_t *>( p ) = static_cast<int32_t>( reinterpret_cast<uint8_t *>( &OnPresentBody ) - ( p + 4 ) );
+    p += 4;
+    *p++ = 0x83; *p++ = 0xC4; *p++ = 0x04;         // add esp, 4
+    *p++ = 0x9D;                                   // popfd
+    *p++ = 0x61;                                   // popad
+    memcpy( p, body, length );                     // the moved instructions
+    p += length;
+    *p++ = 0xE9;                                   // jmp back
+    *reinterpret_cast<int32_t *>( p ) = static_cast<int32_t>( ( body + length ) - ( p + 4 ) );
+    DWORD old;
+    if ( !VirtualProtect( body, length, PAGE_EXECUTE_READWRITE, &old ) )
+        return false;
+    body[0] = 0xE9;
+    *reinterpret_cast<int32_t *>( body + 1 ) = static_cast<int32_t>( stub - ( body + 5 ) );
+    for ( size_t i = 5; i < length; i++ )
+        body[i] = 0x90;
+    VirtualProtect( body, length, old, &old );
+    FlushInstructionCache( GetCurrentProcess(), body, length );
+    return true;
+}
+} // namespace
+
 void CFrameGenBridge::HookPresent( IDXGISwapChain *swapChain )
 {
     if ( g_presentHooked || !swapChain || !gDebugSettings.GetToggleField( "FrameGenBridge" ) )
         return;
     uint8_t *code = static_cast<uint8_t *>( ( *reinterpret_cast<void ***>( swapChain ) )[8] ); // Present
+    BridgeLog( "Present at %p: %02X %02X %02X %02X %02X | %02X %02X %02X %02X %02X %02X", code, code[0], code[1], code[2],
+               code[3], code[4], code[5], code[6], code[7], code[8], code[9], code[10] );
+    if ( HookPresentBody( code ) )
+    {
+        BridgeLog( "hooked inside Present (runs after every other hook)" );
+        g_presentHooked = true;
+        return;
+    }
+    BridgeLog( "Present's body is unknown, hooking its start (overlays hooked later still run first)" );
     // Where to put our jump and what comes next. Present is often hooked already (overlays injected into every
     // process): then our hook runs before that one, which carries on to DXGI.
     uint8_t * site = code;
@@ -752,8 +844,7 @@ void CFrameGenBridge::HookPresent( IDXGISwapChain *swapChain )
     }
     else
     {
-        g_pDebug->printMsg( "Frame generation bridge: unknown Present prologue, frames handed over before Present "
-                            "(overlays drawn in Present won't show)", 0 );
+        BridgeLog( "unknown Present prologue: frames handed over before Present (overlays drawn in Present won't show)" );
         return;
     }
     DWORD old;
