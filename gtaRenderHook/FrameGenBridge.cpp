@@ -113,6 +113,7 @@ bool                    g_hasPrev;
 // Reflex: the game's frame index (counted at frame start) and the events of the marker queue
 HANDLE                  g_markerEvent, g_sleptEvent;
 uint32_t                g_simIndex;
+int64_t                 g_frameStartQpc; // start of the current game frame, for latency measurements
 bool                    g_reflexOff;
 
 template <class T> void Release( T *&p )
@@ -507,6 +508,9 @@ void CFrameGenBridge::CaptureHudless()
 
 void CFrameGenBridge::FrameStart()
 {
+    LARGE_INTEGER now;
+    QueryPerformanceCounter( &now );
+    g_frameStartQpc = now.QuadPart; // after NvReflex's sleep (called before us), before the frame reads input
     if ( !ReflexActive() )
         return;
     g_shared->gameMarkers = 1;
@@ -598,6 +602,7 @@ void CFrameGenBridge::PublishFrame()
     g_context->Signal( g_readyFence, next );
     g_context->Flush();
     g_shared->slotFrameIndex[slot] = g_simIndex; // presented under the game's frame index (Reflex markers)
+    g_shared->frameStartQpc[slot]  = g_frameStartQpc;
     Marker( rhfg::MarkerRenderSubmitEnd );
 
     LARGE_INTEGER now;

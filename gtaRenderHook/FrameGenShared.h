@@ -7,7 +7,7 @@
 
 namespace rhfg {
 
-const uint32_t kVersion = 4;
+const uint32_t kVersion = 5;
 const uint32_t kSlots   = 3; // shared frame textures, used round-robin
 
 enum : uint32_t { StateStarting, StateReady, StateFailed };
@@ -70,6 +70,7 @@ struct Shared
     // Reflex: the game's frame index of the frame in each slot, and the marker queue (game writes head, helper tail)
     volatile uint32_t slotFrameIndex[kSlots];
     volatile uint32_t slotHasHud[kSlots]; // 1: hHudless/hUi of this slot hold the frame's HUD-less image and HUD layer
+    volatile int64_t  frameStartQpc[kSlots]; // QPC at the start of the game's frame (after Reflex's sleep, before input)
     MarkerEvent markers[kMarkers];
     volatile uint32_t markerHead, markerTail;
     volatile uint32_t reflexReady;   // helper: its marker thread and Streamline's Reflex are up
