@@ -114,6 +114,7 @@ bool                    g_hasPrev;
 HANDLE                  g_markerEvent, g_sleptEvent;
 uint32_t                g_simIndex;
 int64_t                 g_frameStartQpc; // start of the current game frame, for latency measurements
+HANDLE                  g_pickedEvent;   // back-pressure: the helper took a frame to present
 bool                    g_reflexOff;
 
 template <class T> void Release( T *&p )
@@ -229,6 +230,9 @@ bool StartHelper()
     rhfg::ReflexNames( pid, markerName, sleptName, sizeof markerName );
     g_markerEvent = CreateEventA( nullptr, FALSE, FALSE, markerName );
     g_sleptEvent  = CreateEventA( nullptr, FALSE, FALSE, sleptName );
+    char pickedName[64];
+    rhfg::PickedName( pid, pickedName, sizeof pickedName );
+    g_pickedEvent = CreateEventA( nullptr, FALSE, FALSE, pickedName );
     if ( !g_shared || !g_frameEvent || !g_configEvent || !g_markerEvent || !g_sleptEvent )
     {
         Break( "could not create shared memory/events" );
@@ -508,6 +512,16 @@ void CFrameGenBridge::CaptureHudless()
 
 void CFrameGenBridge::FrameStart()
 {
+    // Back-pressure: start this frame only once the helper took our previous one to present. With frame generation
+    // its Present is held for frame pacing, and frames rendered meanwhile would only be skipped: so the game runs at
+    // the rate frame generation shows, and each frame starts (reads input) as late as that allows. 50 ms at most.
+    if ( g_started && !g_broken && g_shared && g_shared->state == rhfg::StateReady && g_pickedEvent && g_frame > 0 &&
+         gDebugSettings.GetToggleField( "FrameGenBridge" ) && gDebugSettings.GetToggleField( "FrameGenBackPressure" ) )
+    {
+        const DWORD start = GetTickCount();
+        while ( g_shared->pickedFrame < g_frame && GetTickCount() - start < 50 )
+            WaitForSingleObject( g_pickedEvent, 5 );
+    }
     LARGE_INTEGER now;
     QueryPerformanceCounter( &now );
     g_frameStartQpc = now.QuadPart; // after NvReflex's sleep (called before us), before the frame reads input

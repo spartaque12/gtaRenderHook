@@ -162,6 +162,8 @@ public:
         m_aFields["FrameGenBridge"] = new ToggleSField( "FrameGenBridge", true, false, false, m_sName, false );
         // Reflex through the bridge: sleep at frame start as Reflex decides (off = markers only)
         m_aFields["FrameGenReflexSleep"] = new ToggleSField( "FrameGenReflexSleep", true, false, false, m_sName, true );
+        // the game waits for the helper to take its previous frame (no frames rendered just to be skipped)
+        m_aFields["FrameGenBackPressure"] = new ToggleSField( "FrameGenBackPressure", false, false, false, m_sName, true );
         m_aFields["FrameGenBridgeVSync"] = new IntSField( "FrameGenBridgeVSync", true, false, false, m_sName, 0, 0, 1 );
         // NVIDIA Reflex on RenderHook's device (CNvReflex); Boost keeps GPU clocks up
         m_aFields["NvReflex"] = new ToggleSField( "NvReflex", false, false, false, m_sName, false );

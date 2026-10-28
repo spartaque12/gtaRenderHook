@@ -7,7 +7,7 @@
 
 namespace rhfg {
 
-const uint32_t kVersion = 5;
+const uint32_t kVersion = 6;
 const uint32_t kSlots   = 3; // shared frame textures, used round-robin
 
 enum : uint32_t { StateStarting, StateReady, StateFailed };
@@ -71,6 +71,9 @@ struct Shared
     volatile uint32_t slotFrameIndex[kSlots];
     volatile uint32_t slotHasHud[kSlots]; // 1: hHudless/hUi of this slot hold the frame's HUD-less image and HUD layer
     volatile int64_t  frameStartQpc[kSlots]; // QPC at the start of the game's frame (after Reflex's sleep, before input)
+    // back-pressure: the frame the helper's presenting thread took last ("picked" event); the game starts its next
+    // frame only once its previous one is taken, so it never renders frames that frame generation would skip
+    volatile uint64_t pickedFrame;
     MarkerEvent markers[kMarkers];
     volatile uint32_t markerHead, markerTail;
     volatile uint32_t reflexReady;   // helper: its marker thread and Streamline's Reflex are up
@@ -88,6 +91,11 @@ inline void ReflexNames( uint32_t pid, char *markerEvent, char *sleptEvent, size
 {
     snprintf( markerEvent, size, "Local\\RHFG_%u_marker", pid );
     snprintf( sleptEvent, size, "Local\\RHFG_%u_slept", pid );
+}
+
+inline void PickedName( uint32_t pid, char *pickedEvent, size_t size )
+{
+    snprintf( pickedEvent, size, "Local\\RHFG_%u_picked", pid );
 }
 
 } // namespace rhfg
