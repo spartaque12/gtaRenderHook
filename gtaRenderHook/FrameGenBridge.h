@@ -14,6 +14,11 @@ public:
     */
     static void PublishFrame();
     /*!
+        Snapshot of the frame without the HUD, taken by CHudLayer::End before it composites the HUD; published with
+        the HUD layer itself, so frame generation keeps the HUD out of the interpolation.
+    */
+    static void CaptureHudless();
+    /*!
         Reflex, at the start of the game's frame (before input is read): sleeps as long as Reflex wants (the helper
         calls slReflexSleep) and marks the simulation start. No-op until the helper is up.
     */

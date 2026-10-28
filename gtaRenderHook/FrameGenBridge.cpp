@@ -8,6 +8,7 @@
 #include "SettingsHolder.h"
 #include "TemporalAA.h"
 #include "NvReflex.h"
+#include "HudLayer.h"
 #include <game_sa\CScene.h>
 #include <d3d11_4.h>
 #include <d3dcompiler.h>
@@ -96,6 +97,11 @@ ID3D11Buffer *          g_cb;
 ID3D11Texture2D *       g_frames[rhfg::kSlots];
 ID3D11Texture2D *       g_depth[rhfg::kSlots];
 ID3D11Texture2D *       g_motion[rhfg::kSlots];
+ID3D11Texture2D *       g_hudless[rhfg::kSlots];
+ID3D11Texture2D *       g_ui[rhfg::kSlots];
+// the frame before the HUD, copied when the HUD layer is composited (CaptureHudless), until the frame is published
+ID3D11Texture2D *       g_hudlessStage;
+bool                    g_hudCaptured;
 ID3D11RenderTargetView *g_depthRtv[rhfg::kSlots];
 ID3D11RenderTargetView *g_motionRtv[rhfg::kSlots];
 ID3D11Fence *           g_readyFence, *g_doneFence;
@@ -305,7 +311,11 @@ void ReleaseFrames()
         Release( g_frames[i] );
         Release( g_depth[i] );
         Release( g_motion[i] );
+        Release( g_hudless[i] );
+        Release( g_ui[i] );
     }
+    Release( g_hudlessStage );
+    g_hudCaptured = false;
     Release( g_readyFence );
     Release( g_doneFence );
 }
@@ -327,6 +337,11 @@ bool Configure( const D3D11_TEXTURE2D_DESC &backBuffer )
         d.Format    = backBuffer.Format;
         d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         hr = g_device->CreateTexture2D( &d, nullptr, &g_frames[i] );
+        if ( SUCCEEDED( hr ) )
+            hr = g_device->CreateTexture2D( &d, nullptr, &g_hudless[i] );
+        d.Format = DXGI_FORMAT_R8G8B8A8_UNORM; // CHudLayer's raster (rwRASTERFORMATDEFAULT)
+        if ( SUCCEEDED( hr ) )
+            hr = g_device->CreateTexture2D( &d, nullptr, &g_ui[i] );
         d.Format    = DXGI_FORMAT_R32_FLOAT;
         d.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
         if ( SUCCEEDED( hr ) )
@@ -338,6 +353,14 @@ bool Configure( const D3D11_TEXTURE2D_DESC &backBuffer )
             hr = g_device->CreateRenderTargetView( g_depth[i], nullptr, &g_depthRtv[i] );
         if ( SUCCEEDED( hr ) )
             hr = g_device->CreateRenderTargetView( g_motion[i], nullptr, &g_motionRtv[i] );
+    }
+    if ( SUCCEEDED( hr ) )
+    {
+        D3D11_TEXTURE2D_DESC stage = d;
+        stage.Format    = backBuffer.Format;
+        stage.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        stage.MiscFlags = 0;
+        hr = g_device->CreateTexture2D( &stage, nullptr, &g_hudlessStage );
     }
     if ( SUCCEEDED( hr ) )
         hr = g_device->CreateFence( 0, D3D11_FENCE_FLAG_SHARED, __uuidof( ID3D11Fence ), reinterpret_cast<void **>( &g_readyFence ) );
@@ -353,7 +376,10 @@ bool Configure( const D3D11_TEXTURE2D_DESC &backBuffer )
         g_shared->hFrame[i]  = reinterpret_cast<uint64_t>( ShareWithHelper( g_frames[i], false ) );
         g_shared->hDepth[i]  = reinterpret_cast<uint64_t>( ShareWithHelper( g_depth[i], false ) );
         g_shared->hMotion[i] = reinterpret_cast<uint64_t>( ShareWithHelper( g_motion[i], false ) );
+        g_shared->hHudless[i] = reinterpret_cast<uint64_t>( ShareWithHelper( g_hudless[i], false ) );
+        g_shared->hUi[i]      = reinterpret_cast<uint64_t>( ShareWithHelper( g_ui[i], false ) );
     }
+    g_shared->uiFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
     g_shared->hReadyFence = reinterpret_cast<uint64_t>( ShareWithHelper( g_readyFence, true ) );
     g_shared->hDoneFence  = reinterpret_cast<uint64_t>( ShareWithHelper( g_doneFence, true ) );
     g_shared->width  = g_width = d.Width;
@@ -462,6 +488,23 @@ void PushMarker( uint32_t marker )
 }
 } // namespace
 
+void CFrameGenBridge::CaptureHudless()
+{
+    if ( !g_hudlessStage || g_broken || !gDebugSettings.GetToggleField( "FrameGenBridge" ) )
+        return;
+    ID3D11Texture2D *backBuffer = nullptr;
+    if ( FAILED( GET_D3D_RENDERER->getSwapChain()->GetBuffer( 0, __uuidof( ID3D11Texture2D ), reinterpret_cast<void **>( &backBuffer ) ) ) )
+        return;
+    D3D11_TEXTURE2D_DESC desc;
+    backBuffer->GetDesc( &desc );
+    if ( desc.Width == g_width && desc.Height == g_height && desc.Format == g_format )
+    {
+        g_context->CopyResource( g_hudlessStage, backBuffer );
+        g_hudCaptured = true;
+    }
+    backBuffer->Release();
+}
+
 void CFrameGenBridge::FrameStart()
 {
     if ( !ReflexActive() )
@@ -530,6 +573,28 @@ void CFrameGenBridge::PublishFrame()
     DrawMotionVectors( slot );
     g_context->CopyResource( g_frames[slot], backBuffer );
     backBuffer->Release();
+    // HUD-less frame and HUD layer, when the HUD layer drew this frame's HUD
+    bool hasHud = false;
+    if ( g_hudCaptured && CHudLayer::m_pLayerRaster )
+    {
+        auto viewable = dynamic_cast<ID3D1XShaderViewable *>( GetD3D1XRaster( CHudLayer::m_pLayerRaster )->resourse );
+        ID3D11ShaderResourceView *srv = viewable ? viewable->GetShaderResourceView() : nullptr;
+        ID3D11Resource *layer = nullptr;
+        if ( srv )
+            srv->GetResource( &layer );
+        D3D11_TEXTURE2D_DESC layerDesc = {};
+        if ( layer )
+            static_cast<ID3D11Texture2D *>( layer )->GetDesc( &layerDesc );
+        if ( layer && layerDesc.Width == g_width && layerDesc.Height == g_height && layerDesc.Format == DXGI_FORMAT_R8G8B8A8_UNORM )
+        {
+            g_context->CopyResource( g_hudless[slot], g_hudlessStage );
+            g_context->CopyResource( g_ui[slot], layer );
+            hasHud = true;
+        }
+        Release( layer );
+    }
+    g_hudCaptured = false;
+    g_shared->slotHasHud[slot] = hasHud ? 1 : 0;
     g_context->Signal( g_readyFence, next );
     g_context->Flush();
     g_shared->slotFrameIndex[slot] = g_simIndex; // presented under the game's frame index (Reflex markers)

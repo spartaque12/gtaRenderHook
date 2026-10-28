@@ -6,6 +6,7 @@
 #include "D3D1XBaseTexture.h"
 #include "D3D1XDepthStencilTexture.h"
 #include "FullscreenQuad.h"
+#include "FrameGenBridge.h"
 #include "RwD3D1XEngine.h"
 #include "SettingsHolder.h"
 #include <game_sa\CScene.h>
@@ -63,6 +64,7 @@ void CHudLayer::End()
     ID3D11RenderTargetView *rtv = frameTarget->GetRenderTargetView();
     g_pStateMgr->SetRenderTargets( 1, &rtv, depthTarget ? depthTarget->GetDepthStencilView() : nullptr );
     g_pStateMgr->FlushRenderTargets();
+    CFrameGenBridge::CaptureHudless(); // the frame without HUD, for frame generation
 
     const int view = gDebugSettings.GetInt( "HudLayerView" );
     if ( view == 1 ) // the frame without HUD, as frame generation would get it

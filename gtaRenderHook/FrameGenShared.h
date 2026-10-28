@@ -7,7 +7,7 @@
 
 namespace rhfg {
 
-const uint32_t kVersion = 3;
+const uint32_t kVersion = 4;
 const uint32_t kSlots   = 3; // shared frame textures, used round-robin
 
 enum : uint32_t { StateStarting, StateReady, StateFailed };
@@ -54,6 +54,9 @@ struct Shared
     uint64_t hFrame[kSlots];        // final frame, HUD included (what the game would present)
     uint64_t hDepth[kSlots];        // R32_FLOAT hardware-style depth (0 near .. 1 far/sky), from the camera without jitter
     uint64_t hMotion[kSlots];       // R16G16_FLOAT motion in pixels, current -> previous frame, camera and objects
+    uint64_t hHudless[kSlots];      // the frame before the HUD (CHudLayer), format of hFrame
+    uint64_t hUi[kSlots];           // the HUD layer, R8G8B8A8_UNORM premultiplied: frame = ui.rgb + (1 - ui.a) * hudless
+    uint32_t uiFormat;
     uint64_t hReadyFence;           // game signals frame n when slot n % kSlots holds it
     uint64_t hDoneFence;            // helper signals frame n once it's copied out of its slot
     volatile uint32_t configGeneration;
@@ -66,6 +69,7 @@ struct Shared
 
     // Reflex: the game's frame index of the frame in each slot, and the marker queue (game writes head, helper tail)
     volatile uint32_t slotFrameIndex[kSlots];
+    volatile uint32_t slotHasHud[kSlots]; // 1: hHudless/hUi of this slot hold the frame's HUD-less image and HUD layer
     MarkerEvent markers[kMarkers];
     volatile uint32_t markerHead, markerTail;
     volatile uint32_t reflexReady;   // helper: its marker thread and Streamline's Reflex are up
