@@ -25,6 +25,7 @@
 #include <game_sa\CPointLights.h> 
 #include <game_sa\CFont.h>
 #include "HudLayer.h"
+#include "FrameGenBridge.h"
 #include <game_sa\CWorld.h>
 #include <game_sa\CScene.h>
 #include <game_sa\CClock.h>
@@ -390,6 +391,7 @@ void CSAIdleHook::RenderHUD()
         Render2dStuffAfterFade();
     }
     CHudLayer::End();
+    CFrameGenBridge::PublishFrame(); // the finished frame, HUD included, before it's presented
 
     DoRWStuffEndOfFrame();
 }

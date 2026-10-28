@@ -158,6 +158,9 @@ public:
         // 1 = frame without HUD, 2 = HUD layer alone over grey
         m_aFields["HudLayer"] = new ToggleSField( "HudLayer", false, false, false, m_sName, false );
         m_aFields["HudLayerView"] = new IntSField( "HudLayerView", false, false, false, m_sName, 0, 0, 2 );
+        // frame generation bridge, step 1 (CFrameGenBridge): frames presented by RHFrameGen64.exe over the game window
+        m_aFields["FrameGenBridge"] = new ToggleSField( "FrameGenBridge", true, false, false, m_sName, false );
+        m_aFields["FrameGenBridgeVSync"] = new IntSField( "FrameGenBridgeVSync", true, false, false, m_sName, 0, 0, 1 );
         m_aFields["DebugLevel"] = new IntSField( "DebugLevel", true, false, false, m_sName, 0, 0, 2 );
         Reset();
     }

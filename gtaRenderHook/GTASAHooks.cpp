@@ -17,6 +17,7 @@
 #include "LightManager.h"
 #include "FullscreenQuad.h"
 #include "HudLayer.h"
+#include "FrameGenBridge.h"
 #include "DebugRendering.h"
 #include "CustomBuildingPipeline.h"
 #include "CustomBuildingDNPipeline.h"
@@ -119,6 +120,7 @@ void CGTASAHooks::ShutdownWithRW()
     delete g_pCustomBuildingPipe;
     delete g_pCustomCarFXPipe;
     delete g_pDeferredRenderer;
+    CFrameGenBridge::Shutdown();
     CHudLayer::Shutdown();
     CFullscreenQuad::Shutdown();
     CHud::Shutdown();
