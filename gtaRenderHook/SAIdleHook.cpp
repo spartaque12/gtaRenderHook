@@ -194,6 +194,8 @@ void CSAIdleHook::RenderInGame()
     RH_PROFILE_ZONE( ZoneRenderInGame );
     FrameProfiler::BeginZone( FrameProfiler::ZonePrepare );
 
+    // previous world matrices for object motion vectors are per rendered frame
+    g_pRenderBuffersMgr->NextFrame();
     PrepareRenderStuff();
 
     DefinedState();

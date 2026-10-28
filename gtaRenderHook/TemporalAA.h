@@ -26,6 +26,8 @@ public:
     // NDC offset from this frame's jitter to the previous frame's (SSR samples the previous frame)
     static float GetJitterDeltaX() { return m_fPrevJitterX - m_fJitterX; }
     static float GetJitterDeltaY() { return m_fPrevJitterY - m_fJitterY; }
+    // G-buffer target with object motion vectors (CDeferredRenderer), passed on to an external TAA handler
+    static RwRaster *m_pObjectMotionRaster;
 
   private:
     static CD3D1XShader * m_pTemporalAA;
