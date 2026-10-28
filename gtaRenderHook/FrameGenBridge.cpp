@@ -805,14 +805,82 @@ bool HookPresentBody( uint8_t *code )
     FlushInstructionCache( GetCurrentProcess(), body, length );
     return true;
 }
+std::string ModuleOf( const void *address, HMODULE *module = nullptr )
+{
+    HMODULE m = nullptr;
+    char name[MAX_PATH] = "?";
+    if ( GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                             static_cast<LPCSTR>( address ), &m ) )
+        GetModuleFileNameA( m, name, MAX_PATH );
+    if ( module )
+        *module = m;
+    return name;
+}
+
+// the 4 bytes at an RVA of a PE file on disk, and the file's preferred image base
+bool ReadRva( const char *path, uint32_t rva, uint32_t &value, uint32_t &imageBase )
+{
+    HANDLE f = CreateFileA( path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr );
+    if ( f == INVALID_HANDLE_VALUE )
+        return false;
+    bool              ok = false;
+    DWORD             got;
+    IMAGE_DOS_HEADER  dos;
+    IMAGE_NT_HEADERS32 nt;
+    if ( ReadFile( f, &dos, sizeof dos, &got, nullptr ) &&
+         SetFilePointer( f, dos.e_lfanew, nullptr, FILE_BEGIN ) != INVALID_SET_FILE_POINTER &&
+         ReadFile( f, &nt, sizeof nt, &got, nullptr ) && nt.Signature == IMAGE_NT_SIGNATURE )
+    {
+        imageBase = nt.OptionalHeader.ImageBase;
+        SetFilePointer( f, dos.e_lfanew + 4 + sizeof( IMAGE_FILE_HEADER ) + nt.FileHeader.SizeOfOptionalHeader, nullptr, FILE_BEGIN );
+        for ( int i = 0; i < nt.FileHeader.NumberOfSections && !ok; i++ )
+        {
+            IMAGE_SECTION_HEADER sh;
+            if ( !ReadFile( f, &sh, sizeof sh, &got, nullptr ) )
+                break;
+            if ( rva >= sh.VirtualAddress && rva + 4 <= sh.VirtualAddress + sh.SizeOfRawData )
+                ok = SetFilePointer( f, sh.PointerToRawData + ( rva - sh.VirtualAddress ), nullptr, FILE_BEGIN ) !=
+                         INVALID_SET_FILE_POINTER &&
+                     ReadFile( f, &value, 4, &got, nullptr ) && got == 4;
+        }
+    }
+    CloseHandle( f );
+    return ok;
+}
+
+// DXGI's own Present when an overlay replaced the entry in DXGI's shared vtable: the entry as dxgi.dll has it on disk
+// (the loaded copy is the patched one)
+uint8_t *OriginalPresent( void **vtable )
+{
+    HMODULE dxgi = nullptr;
+    const std::string path = ModuleOf( vtable, &dxgi );
+    uint32_t value, imageBase;
+    if ( !dxgi || !ReadRva( path.c_str(), static_cast<uint32_t>( reinterpret_cast<uintptr_t>( &vtable[8] ) -
+                                                                  reinterpret_cast<uintptr_t>( dxgi ) ),
+                            value, imageBase ) )
+        return nullptr;
+    uint8_t *present = reinterpret_cast<uint8_t *>( value - imageBase + reinterpret_cast<uintptr_t>( dxgi ) );
+    HMODULE target = nullptr;
+    ModuleOf( present, &target );
+    return target == dxgi ? present : nullptr;
+}
 } // namespace
 
 void CFrameGenBridge::HookPresent( IDXGISwapChain *swapChain )
 {
     if ( g_presentHooked || !swapChain || !gDebugSettings.GetToggleField( "FrameGenBridge" ) )
         return;
-    uint8_t *code = static_cast<uint8_t *>( ( *reinterpret_cast<void ***>( swapChain ) )[8] ); // Present
-    BridgeLog( "Present at %p: %02X %02X %02X %02X %02X | %02X %02X %02X %02X %02X %02X", code, code[0], code[1], code[2],
+    void **vtable = *reinterpret_cast<void ***>( swapChain );
+    uint8_t *code = static_cast<uint8_t *>( vtable[8] ); // Present
+    BridgeLog( "swapchain vtable in %s, Present at %p in %s", ModuleOf( vtable ).c_str(), code, ModuleOf( code ).c_str() );
+    // an overlay that replaced the vtable entry runs before DXGI's Present and calls it: hook DXGI's own instead
+    if ( uint8_t *original = OriginalPresent( vtable ) )
+        if ( original != code )
+        {
+            BridgeLog( "Present's vtable entry was replaced; DXGI's own is at %p", original );
+            code = original;
+        }
+    BridgeLog( "hooking %p: %02X %02X %02X %02X %02X | %02X %02X %02X %02X %02X %02X", code, code[0], code[1], code[2],
                code[3], code[4], code[5], code[6], code[7], code[8], code[9], code[10] );
     if ( HookPresentBody( code ) )
     {
