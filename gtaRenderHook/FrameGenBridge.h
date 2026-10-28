@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+struct IDXGISwapChain;
 /*!
     Frame generation bridge, step 1: hands every finished frame (HUD included) to RHFrameGen64.exe, a 64-bit D3D12
     helper that presents it in its own window over the game. No frame generation yet; this measures what the bridge
@@ -10,9 +11,20 @@ class CFrameGenBridge
 {
 public:
     /*!
-        Publishes the back buffer as the next frame. Call when the frame is complete, before it's presented.
+        The frame is complete: it's handed to the helper inside the swapchain's Present (see HookPresent), or right
+        away when Present couldn't be hooked.
+    */
+    static void FrameReady();
+    /*!
+        Publishes the back buffer as the next frame.
     */
     static void PublishFrame();
+    /*!
+        Hooks the code of IDXGISwapChain::Present, so the frame is handed over at the last moment: overlays that hook
+        Present to draw into the back buffer (CheatMenu, ...) hook it later, so they run before us. Call right after the
+        swapchain is created.
+    */
+    static void HookPresent( IDXGISwapChain *swapChain );
     /*!
         Snapshot of the frame without the HUD, taken by CHudLayer::End before it composites the HUD; published with
         the HUD layer itself, so frame generation keeps the HUD out of the interpolation.

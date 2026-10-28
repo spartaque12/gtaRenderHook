@@ -401,7 +401,7 @@ void CSAIdleHook::RenderHUD()
         Render2dStuffAfterFade();
     }
     CHudLayer::End();
-    CFrameGenBridge::PublishFrame(); // the finished frame, HUD included, before it's presented
+    CFrameGenBridge::FrameReady(); // the finished frame, HUD included: handed over inside Present
 
     DoRWStuffEndOfFrame();
 }

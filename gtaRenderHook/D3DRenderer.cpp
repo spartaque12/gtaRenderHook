@@ -10,6 +10,7 @@
 #include "D3D1XStateManager.h"
 #include "D3DSpecificHelpers.h"
 #include "CDebug.h"
+#include "FrameGenBridge.h"
 
 CD3DRenderer::CD3DRenderer( HWND& window )
 {
@@ -221,6 +222,8 @@ bool CD3DRenderer::InitDevice()
         CALL_D3D_API( m_pdxgiFactory->CreateSwapChain( m_pd3dDevice, &sd, &m_pSwapChain ), "Failed to create swap chain using DX11 API" );
     }
     m_pdxgiFactory->Release();
+    // before overlays (CheatMenu hooks Present after the game is initialised), so they draw before the hand-over
+    CFrameGenBridge::HookPresent( m_pSwapChain );
 
     g_pDebug->printMsg( "Device initialization: end", 1 );
 

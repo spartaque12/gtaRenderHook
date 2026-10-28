@@ -72,6 +72,24 @@ Output PS(float4 pos : SV_Position)
 }
 )";
 
+// The HUD layer for frame generation, plus whatever was drawn after the HUD (overlays drawing inside Present, like
+// CheatMenu, or AntTweakBar): a pixel that isn't "frame without HUD + HUD layer" was drawn later and goes into the
+// layer as it is, so generated frames show it too instead of flickering it at half the rate.
+const char kOverlayShader[] = R"(
+Texture2D txFrame : register(t0);   // the finished frame
+Texture2D txHudless : register(t1); // the frame before the HUD
+Texture2D txLayer : register(t2);   // the HUD layer, premultiplied
+
+float4 PS(float4 pos : SV_Position) : SV_Target
+{
+    int3 p = int3(pos.xy, 0);
+    float4 ui = txLayer.Load(p);
+    float3 expected = ui.rgb + (1.0 - ui.a) * txHudless.Load(p).rgb;
+    float3 frame = txFrame.Load(p).rgb;
+    return any(abs(frame - expected) > 3.0 / 255.0) ? float4(frame, 1.0) : ui;
+}
+)";
+
 struct Mat
 {
     float m[16];
@@ -93,6 +111,7 @@ ID3D11DeviceContext4 *  g_context;
 ID3DDeviceContextState *g_state;
 ID3D11VertexShader *    g_vs;
 ID3D11PixelShader *     g_ps;
+ID3D11PixelShader *     g_overlayPs;
 ID3D11Buffer *          g_cb;
 ID3D11Texture2D *       g_frames[rhfg::kSlots];
 ID3D11Texture2D *       g_depth[rhfg::kSlots];
@@ -104,6 +123,9 @@ ID3D11Texture2D *       g_hudlessStage;
 bool                    g_hudCaptured;
 ID3D11RenderTargetView *g_depthRtv[rhfg::kSlots];
 ID3D11RenderTargetView *g_motionRtv[rhfg::kSlots];
+ID3D11RenderTargetView *g_uiRtv[rhfg::kSlots];
+ID3D11ShaderResourceView *g_frameSrv[rhfg::kSlots];
+ID3D11ShaderResourceView *g_hudlessStageSrv;
 ID3D11Fence *           g_readyFence, *g_doneFence;
 UINT                    g_width, g_height;
 DXGI_FORMAT             g_format;
@@ -116,6 +138,10 @@ uint32_t                g_simIndex;
 int64_t                 g_frameStartQpc; // start of the current game frame, for latency measurements
 HANDLE                  g_pickedEvent;   // back-pressure: the helper took a frame to present
 bool                    g_reflexOff;
+// hand-over inside Present (HookPresent): next in the chain of Present hooks, and a frame waiting for it
+typedef HRESULT( STDMETHODCALLTYPE *PresentFn )( IDXGISwapChain *, UINT, UINT );
+PresentFn               g_present;
+bool                    g_presentHooked, g_frameReady;
 
 template <class T> void Release( T *&p )
 {
@@ -192,6 +218,18 @@ bool CreateMotionPass()
     if ( SUCCEEDED( hr ) )
         hr = g_device->CreatePixelShader( ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &g_ps );
     Release( vs );
+    Release( ps );
+    if ( SUCCEEDED( hr ) )
+        hr = D3DCompile( kOverlayShader, sizeof kOverlayShader - 1, "FrameGenOverlay", nullptr, nullptr, "PS", "ps_5_0",
+                         D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &ps, &errors );
+    if ( errors )
+    {
+        g_pDebug->printMsg( std::string( "Frame generation overlay shader: " ) +
+                                static_cast<const char *>( errors->GetBufferPointer() ), 0 );
+        errors->Release();
+    }
+    if ( SUCCEEDED( hr ) )
+        hr = g_device->CreatePixelShader( ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &g_overlayPs );
     Release( ps );
     D3D11_BUFFER_DESC cbd = { sizeof( Reprojection ), D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
     if ( SUCCEEDED( hr ) )
@@ -314,12 +352,15 @@ void ReleaseFrames()
     {
         Release( g_depthRtv[i] );
         Release( g_motionRtv[i] );
+        Release( g_uiRtv[i] );
+        Release( g_frameSrv[i] );
         Release( g_frames[i] );
         Release( g_depth[i] );
         Release( g_motion[i] );
         Release( g_hudless[i] );
         Release( g_ui[i] );
     }
+    Release( g_hudlessStageSrv );
     Release( g_hudlessStage );
     g_hudCaptured = false;
     Release( g_readyFence );
@@ -345,9 +386,14 @@ bool Configure( const D3D11_TEXTURE2D_DESC &backBuffer )
         hr = g_device->CreateTexture2D( &d, nullptr, &g_frames[i] );
         if ( SUCCEEDED( hr ) )
             hr = g_device->CreateTexture2D( &d, nullptr, &g_hudless[i] );
-        d.Format = DXGI_FORMAT_R8G8B8A8_UNORM; // CHudLayer's raster (rwRASTERFORMATDEFAULT)
+        if ( SUCCEEDED( hr ) )
+            hr = g_device->CreateShaderResourceView( g_frames[i], nullptr, &g_frameSrv[i] );
+        d.Format    = DXGI_FORMAT_R8G8B8A8_UNORM; // CHudLayer's raster (rwRASTERFORMATDEFAULT)
+        d.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET; // ComposeUi draws it
         if ( SUCCEEDED( hr ) )
             hr = g_device->CreateTexture2D( &d, nullptr, &g_ui[i] );
+        if ( SUCCEEDED( hr ) )
+            hr = g_device->CreateRenderTargetView( g_ui[i], nullptr, &g_uiRtv[i] );
         d.Format    = DXGI_FORMAT_R32_FLOAT;
         d.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
         if ( SUCCEEDED( hr ) )
@@ -367,6 +413,8 @@ bool Configure( const D3D11_TEXTURE2D_DESC &backBuffer )
         stage.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         stage.MiscFlags = 0;
         hr = g_device->CreateTexture2D( &stage, nullptr, &g_hudlessStage );
+        if ( SUCCEEDED( hr ) )
+            hr = g_device->CreateShaderResourceView( g_hudlessStage, nullptr, &g_hudlessStageSrv );
     }
     if ( SUCCEEDED( hr ) )
         hr = g_device->CreateFence( 0, D3D11_FENCE_FLAG_SHARED, __uuidof( ID3D11Fence ), reinterpret_cast<void **>( &g_readyFence ) );
@@ -475,6 +523,37 @@ void DrawMotionVectors( uint32_t slot )
     g_prevProj = proj;
     g_hasPrev  = true;
 }
+// the HUD layer of the slot: CHudLayer's layer plus whatever was drawn after the HUD (kOverlayShader)
+void ComposeUi( uint32_t slot, ID3D11ShaderResourceView *layer )
+{
+    ID3DDeviceContextState *rhState = nullptr;
+    g_context->SwapDeviceContextState( g_state, &rhState );
+    g_context->OMSetRenderTargets( 1, &g_uiRtv[slot], nullptr );
+    D3D11_VIEWPORT vp = { 0, 0, static_cast<float>( g_width ), static_cast<float>( g_height ), 0, 1 };
+    g_context->RSSetViewports( 1, &vp );
+    g_context->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
+    g_context->VSSetShader( g_vs, nullptr, 0 );
+    g_context->PSSetShader( g_overlayPs, nullptr, 0 );
+    ID3D11ShaderResourceView *srvs[3] = { g_frameSrv[slot], g_hudlessStageSrv, layer };
+    g_context->PSSetShaderResources( 0, 3, srvs );
+    g_context->Draw( 3, 0 );
+    ID3D11ShaderResourceView *nullSrvs[3] = {};
+    g_context->PSSetShaderResources( 0, 3, nullSrvs );
+    g_context->OMSetRenderTargets( 0, nullptr, nullptr );
+    g_context->SwapDeviceContextState( rhState, nullptr );
+    Release( rhState );
+}
+
+HRESULT STDMETHODCALLTYPE HookedPresent( IDXGISwapChain *self, UINT syncInterval, UINT flags )
+{
+    if ( g_frameReady && self == GET_D3D_RENDERER->getSwapChain() )
+    {
+        g_frameReady = false;
+        CFrameGenBridge::PublishFrame(); // the overlays hooked before us have drawn by now
+    }
+    return g_present( self, syncInterval, flags );
+}
+
 bool ReflexActive()
 {
     return g_started && !g_broken && !g_reflexOff && g_shared && g_shared->state == rhfg::StateReady &&
@@ -607,7 +686,7 @@ void CFrameGenBridge::PublishFrame()
         if ( layer && layerDesc.Width == g_width && layerDesc.Height == g_height && layerDesc.Format == DXGI_FORMAT_R8G8B8A8_UNORM )
         {
             g_context->CopyResource( g_hudless[slot], g_hudlessStage );
-            g_context->CopyResource( g_ui[slot], layer );
+            ComposeUi( slot, srv );
             hasHud = true;
         }
         Release( layer );
@@ -628,12 +707,74 @@ void CFrameGenBridge::PublishFrame()
     SetEvent( g_frameEvent );
 }
 
+void CFrameGenBridge::FrameReady()
+{
+    // the previous frame still waiting: our hook didn't run (removed by another tool restoring Present's code)
+    if ( g_presentHooked && g_frameReady )
+    {
+        g_pDebug->printMsg( "Frame generation bridge: Present hook lost, frames handed over before Present", 0 );
+        g_presentHooked = false;
+    }
+    if ( g_presentHooked )
+        g_frameReady = true; // handed over inside Present
+    else
+    {
+        g_frameReady = false;
+        PublishFrame();
+    }
+}
+
+void CFrameGenBridge::HookPresent( IDXGISwapChain *swapChain )
+{
+    if ( g_presentHooked || !swapChain || !gDebugSettings.GetToggleField( "FrameGenBridge" ) )
+        return;
+    uint8_t *code = static_cast<uint8_t *>( ( *reinterpret_cast<void ***>( swapChain ) )[8] ); // Present
+    // Where to put our jump and what comes next. Present is often hooked already (overlays injected into every
+    // process): then our hook runs before that one, which carries on to DXGI.
+    uint8_t * site = code;
+    PresentFn next = nullptr;
+    if ( code[0] == 0xE9 ) // a hook's jump
+        next = reinterpret_cast<PresentFn>( code + 5 + *reinterpret_cast<int32_t *>( code + 1 ) );
+    else if ( code[0] == 0xEB && code[1] == 0xF9 && code[-5] == 0xE9 ) // hot-patched: short jump to a jump before it
+    {
+        site = code - 5;
+        next = reinterpret_cast<PresentFn>( code + *reinterpret_cast<int32_t *>( code - 4 ) );
+    }
+    else if ( memcmp( code, "\x8B\xFF\x55\x8B\xEC", 5 ) == 0 ) // mov edi, edi; push ebp; mov ebp, esp
+    {
+        auto trampoline = static_cast<uint8_t *>( VirtualAlloc( nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE ) );
+        if ( !trampoline )
+            return;
+        memcpy( trampoline, code, 5 );
+        trampoline[5] = 0xE9;
+        *reinterpret_cast<int32_t *>( trampoline + 6 ) = static_cast<int32_t>( ( code + 5 ) - ( trampoline + 10 ) );
+        next = reinterpret_cast<PresentFn>( trampoline );
+    }
+    else
+    {
+        g_pDebug->printMsg( "Frame generation bridge: unknown Present prologue, frames handed over before Present "
+                            "(overlays drawn in Present won't show)", 0 );
+        return;
+    }
+    DWORD old;
+    if ( !VirtualProtect( site, 5, PAGE_EXECUTE_READWRITE, &old ) )
+        return;
+    g_present = next;
+    site[0] = 0xE9;
+    *reinterpret_cast<int32_t *>( site + 1 ) =
+        static_cast<int32_t>( reinterpret_cast<uint8_t *>( &HookedPresent ) - ( site + 5 ) );
+    VirtualProtect( site, 5, old, &old );
+    FlushInstructionCache( GetCurrentProcess(), site, 5 );
+    g_presentHooked = true;
+}
+
 void CFrameGenBridge::Shutdown()
 {
     ReleaseFrames();
     Release( g_cb );
     Release( g_vs );
     Release( g_ps );
+    Release( g_overlayPs );
     Release( g_state );
     Release( g_context );
     Release( g_device );
