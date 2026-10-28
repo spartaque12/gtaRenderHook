@@ -154,6 +154,10 @@ public:
         m_aFields["ShowPreformanceCounters"] = new ToggleSField( "ShowPreformanceCounters", false, false, false, m_sName );
         m_aFields["DebugMessaging"] = new ToggleSField( "DebugMessaging", false, false, false, m_sName, true );
         m_aFields["DebugRenderTarget"] = new ToggleSField( "DebugRenderTarget", false, true, false, m_sName );
+        // HUD layer (CHudLayer): 2D drawn into its own layer, composited before Present; view 0 = normal,
+        // 1 = frame without HUD, 2 = HUD layer alone over grey
+        m_aFields["HudLayer"] = new ToggleSField( "HudLayer", false, false, false, m_sName, false );
+        m_aFields["HudLayerView"] = new IntSField( "HudLayerView", false, false, false, m_sName, 0, 0, 2 );
         m_aFields["DebugLevel"] = new IntSField( "DebugLevel", true, false, false, m_sName, 0, 0, 2 );
         Reset();
     }

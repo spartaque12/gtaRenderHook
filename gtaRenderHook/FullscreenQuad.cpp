@@ -102,6 +102,24 @@ void CFullscreenQuad::Copy( RwRaster * from, RwRaster * zBuffer, RwRaster * to )
     Draw();
 }
 
+void CFullscreenQuad::DrawPremultiplied( RwRaster * from )
+{
+    const BOOL            blend    = g_pStateMgr->GetAlphaBlendEnable();
+    const RwBlendFunction srcBlend = g_pStateMgr->GetSrcAlphaBlend();
+    const RwBlendFunction dstBlend = g_pStateMgr->GetDestAlphaBlend();
+    g_pRwCustomEngine->RenderStateSet( rwRENDERSTATEZTESTENABLE, 0 );
+    g_pStateMgr->SetAlphaBlendEnable( TRUE );
+    g_pStateMgr->SetSrcAlphaBlend( rwBLENDONE );
+    g_pStateMgr->SetDestAlphaBlend( rwBLENDINVSRCALPHA );
+    g_pStateMgr->SetRaster( from );
+    m_BlitPS->Set();
+    Draw();
+    g_pStateMgr->SetRaster( nullptr );
+    g_pStateMgr->SetAlphaBlendEnable( blend );
+    g_pStateMgr->SetSrcAlphaBlend( srcBlend );
+    g_pStateMgr->SetDestAlphaBlend( dstBlend );
+}
+
 void CFullscreenQuad::QueueTextureReload()
 {
     CRwD3D1XEngine* dxEngine = (CRwD3D1XEngine*)g_pRwCustomEngine;

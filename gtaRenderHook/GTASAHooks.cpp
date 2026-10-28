@@ -16,6 +16,7 @@
 #include <game_sa\CModelInfo.h>
 #include "LightManager.h"
 #include "FullscreenQuad.h"
+#include "HudLayer.h"
 #include "DebugRendering.h"
 #include "CustomBuildingPipeline.h"
 #include "CustomBuildingDNPipeline.h"
@@ -83,6 +84,7 @@ void CGTASAHooks::InitWithRW()
 #endif
     CHud::Initialise();
     CFullscreenQuad::Init();
+    CHudLayer::Init();
     DebugRendering::Init();
     g_pDeferredRenderer = new CDeferredRenderer();
     g_pCustomBuildingPipe = new CCustomBuildingPipeline();
@@ -117,6 +119,7 @@ void CGTASAHooks::ShutdownWithRW()
     delete g_pCustomBuildingPipe;
     delete g_pCustomCarFXPipe;
     delete g_pDeferredRenderer;
+    CHudLayer::Shutdown();
     CFullscreenQuad::Shutdown();
     CHud::Shutdown();
 #ifdef USE_ANTTWEAKBAR

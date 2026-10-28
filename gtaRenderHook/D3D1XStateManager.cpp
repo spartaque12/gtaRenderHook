@@ -185,6 +185,8 @@ CD3D1XStateManager::~CD3D1XStateManager()
     if ( m_pBlendState_BlendDestOne )			m_pBlendState_BlendDestOne->Release();
     if ( m_pBlendState_AlphaBlend )			m_pBlendState_AlphaBlend->Release();
     if ( m_pBlendState_Default )			m_pBlendState_Default->Release();
+    for ( auto &state : m_hudLayerBlendStates )
+        state.second->Release();
 }
 
 void CD3D1XStateManager::SetCullMode( RwCullMode mode )
@@ -363,6 +365,61 @@ void CD3D1XStateManager::SetDestAlphaBlend( RwBlendFunction func )
         m_blendDesc.RenderTarget[0].DestBlend = blendFunc;
         m_bBlendDescReqUpdate = true;
     }
+}
+
+void CD3D1XStateManager::SetHudLayerMode( bool enable )
+{
+    if ( m_bHudLayerMode == enable )
+        return;
+    m_bHudLayerMode = enable;
+    // the colour blend may not change, but the state has to: force the next flush to set it
+    m_blendDescOld.RenderTarget[0].SrcBlend = static_cast<D3D11_BLEND>( 0 );
+}
+
+// The HUD layer starts transparent (0, 0, 0, 0) and is composited with ONE, INV_SRC_ALPHA (premultiplied). The game's
+// colour blend stays as it is, which already gives premultiplied colour on a transparent target; only alpha needs its
+// own factors:
+//  - blending over (dest INV_SRC_ALPHA): alpha = src + dest * (1 - src), coverage accumulates;
+//  - additive (dest ONE): alpha unchanged, the glow adds to whatever is under the HUD;
+//  - no blending: alpha = 1 (blend factor), the pixel covers the frame;
+//  - anything else (multiplying blends): alpha unchanged as well, logged once, as the layer can't represent it.
+ID3D11BlendState *CD3D1XStateManager::GetHudLayerBlendState()
+{
+    const D3D11_RENDER_TARGET_BLEND_DESC &rt = m_blendDesc.RenderTarget[0];
+    const unsigned int key = ( rt.BlendEnable ? 1u : 0u ) | ( (unsigned int)rt.SrcBlend << 1 ) | ( (unsigned int)rt.DestBlend << 6 );
+    auto found = m_hudLayerBlendStates.find( key );
+    if ( found != m_hudLayerBlendStates.end() )
+        return found->second;
+
+    D3D11_BLEND_DESC desc = m_blendDesc;
+    D3D11_RENDER_TARGET_BLEND_DESC &out = desc.RenderTarget[0];
+    out.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    if ( !rt.BlendEnable )
+    {
+        out.BlendEnable    = TRUE;
+        out.SrcBlend       = D3D11_BLEND_ONE;
+        out.DestBlend      = D3D11_BLEND_ZERO;
+        out.SrcBlendAlpha  = D3D11_BLEND_BLEND_FACTOR;
+        out.DestBlendAlpha = D3D11_BLEND_ZERO;
+    }
+    else if ( rt.DestBlend == D3D11_BLEND_INV_SRC_ALPHA )
+    {
+        out.SrcBlendAlpha  = D3D11_BLEND_ONE;
+        out.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    }
+    else
+    {
+        out.SrcBlendAlpha  = D3D11_BLEND_ZERO;
+        out.DestBlendAlpha = D3D11_BLEND_ONE;
+        if ( rt.DestBlend != D3D11_BLEND_ONE )
+            g_pDebug->printMsg( "HUD layer: blend SRC " + to_string( rt.SrcBlend ) + " DST " + to_string( rt.DestBlend ) +
+                                    " can't be kept in the layer (drawn without its effect on the frame)", 0 );
+    }
+    ID3D11BlendState *state = nullptr;
+    auto dev = GET_D3D_DEVICE;
+    CALL_D3D_API( dev->CreateBlendState( &desc, &state ), "Failed to create HUD layer blend state" );
+    m_hudLayerBlendStates[key] = state;
+    return state;
 }
 
 void CD3D1XStateManager::SetSrcAlphaBlend( RwBlendFunction func )
@@ -696,7 +753,17 @@ void CD3D1XStateManager::FlushStates()
         m_depthStencilDescOld = m_depthStencilDesc;
     }
     // Blend state.
-    if ( IsBlendDescRequiresUpdate() )
+    if ( m_bHudLayerMode && IsBlendDescRequiresUpdate() )
+    {
+        if ( m_pBlendState )
+            m_pBlendState->Release();
+        m_pBlendState = GetHudLayerBlendState();
+        m_pBlendState->AddRef();
+        const float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f }; // alpha of opaque draws (D3D11_BLEND_BLEND_FACTOR)
+        context->OMSetBlendState( m_pBlendState, blendFactor, UINT_MAX );
+        m_blendDescOld = m_blendDesc;
+    }
+    else if ( IsBlendDescRequiresUpdate() )
     {
         if ( m_pBlendState )
         {

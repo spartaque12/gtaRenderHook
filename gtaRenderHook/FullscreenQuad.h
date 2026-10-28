@@ -16,6 +16,8 @@ public:
     static void Draw();
     static void Copy( RwRaster* from, RwRaster* zBuffer );
     static void Copy( RwRaster* from, RwRaster* zBuffer, RwRaster* to );
+    // Draws a premultiplied-alpha raster over the bound render target (ONE, INV_SRC_ALPHA), without depth test
+    static void DrawPremultiplied( RwRaster* from );
     static void QueueTextureReload();
     static RwRaster*	m_pBlitRaster;
 private:

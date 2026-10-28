@@ -24,6 +24,7 @@
 #include "CloudRendering.h"
 #include <game_sa\CPointLights.h> 
 #include <game_sa\CFont.h>
+#include "HudLayer.h"
 #include <game_sa\CWorld.h>
 #include <game_sa\CScene.h>
 #include <game_sa\CClock.h>
@@ -112,6 +113,7 @@ void CSAIdleHook::Idle( void *Data )
     CCloudRendering::QueueTextureReload();
     CAmbientOcclusion::QueueTextureReload();
     CFullscreenQuad::QueueTextureReload();
+    CHudLayer::QueueTextureReload();
     CTemporalAA::QueueTextureReload();
     // TODO: move to RwD3D1XEngine
     CRwD3D1XEngine* dxEngine = (CRwD3D1XEngine*)g_pRwCustomEngine;
@@ -336,6 +338,8 @@ void CSAIdleHook::RenderInGame()
          gDebugSettings.DebugRenderTargetList[gDebugSettings.DebugRenderTargetNumber] != nullptr )
         DebugRendering::RenderRaster( gDebugSettings.DebugRenderTargetList[gDebugSettings.DebugRenderTargetNumber] );
 
+    // from here on 2D: into the HUD layer when it's on, the frame stays without HUD until CHudLayer::End
+    CHudLayer::Begin();
     DefinedState();
     int Render2dStuffAddress = *(DWORD *)0x53EB13 + 0x53EB12 + 5;
     FrameProfiler::BeginZone( FrameProfiler::Zone2D );
@@ -385,6 +389,7 @@ void CSAIdleHook::RenderHUD()
         DoFade();
         Render2dStuffAfterFade();
     }
+    CHudLayer::End();
 
     DoRWStuffEndOfFrame();
 }

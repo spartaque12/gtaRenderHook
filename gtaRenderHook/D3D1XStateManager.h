@@ -1,6 +1,7 @@
 #ifndef D3D1XStateManager_h__
 #define D3D1XStateManager_h__
 #include <map>
+#include <unordered_map>
 #include "D3D1XConstantBuffer.h"
 #include "D3D1XStructuredBuffer.h"
 #include "D3D1XEnumParser.h"
@@ -121,6 +122,11 @@ public:
         Changes current alpha blending source function.
     */
     void SetSrcAlphaBlend( RwBlendFunction func );
+    /*!
+        HUD layer mode: 2D is drawn into a transparent layer (CHudLayer) that is composited over the frame later, so
+        every blend state gets alpha factors that keep the layer's alpha as premultiplied coverage.
+    */
+    void SetHudLayerMode( bool enable );
     /*!
         Changes current texture UV adress mode.
     */
@@ -371,6 +377,10 @@ private:
     D3D11_DEPTH_STENCIL_DESC	m_depthStencilDescOld{};
     D3D11_BLEND_DESC			m_blendDesc{};
     D3D11_BLEND_DESC			m_blendDescOld{};
+    // HUD layer mode (SetHudLayerMode): blend states by colour blend (enable, src, dest)
+    bool m_bHudLayerMode = false;
+    std::unordered_map<unsigned int, ID3D11BlendState *> m_hudLayerBlendStates;
+    ID3D11BlendState *GetHudLayerBlendState();
     D3D11_SAMPLER_DESC			m_sampDesc{};
     D3D11_SAMPLER_DESC			m_sampDescOld{};
     D3D11_SAMPLER_DESC			m_compSampDesc{};
