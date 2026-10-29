@@ -143,6 +143,56 @@ bool CRwD3D1XEngine::Focus( bool )
     return true;
 }
 
+// Textures made from images (RwImage: PNG/BMP files read by plugins such as Effects Loader; the game itself only loads
+// TXDs). Without these, RwRasterCreate got the default pixel format, which RenderHook can't create, and no pixels.
+// The format: 32-bit RGBA, no mip levels (RasterSetFromImage fills level 0 only).
+static bool mImageFindRasterFormat( void *rasterOut, void *imageIn, int flags )
+{
+    auto raster  = static_cast<RwRaster *>( rasterOut );
+    auto image   = static_cast<RwImage *>( imageIn );
+    raster->width   = image->width;
+    raster->height  = image->height;
+    raster->depth   = 32;
+    raster->cType   = static_cast<RwUInt8>( flags & rwRASTERTYPEMASK );
+    raster->cFormat = static_cast<RwUInt8>( rwRASTERFORMAT8888 >> 8 );
+    return true;
+}
+
+// Image (32-bit RGBA, or 8/4-bit with an RGBA palette) into the raster's level 0, as BGRA (rwRASTERFORMAT8888)
+static bool mRasterSetFromImage( void *rasterOut, void *imageIn, int )
+{
+    auto raster    = static_cast<RwRaster *>( rasterOut );
+    auto image     = static_cast<RwImage *>( imageIn );
+    auto d3dRaster = GetD3D1XRaster( raster );
+    if ( !d3dRaster->resourse || !image->cpPixels || d3dRaster->format != DXGI_FORMAT_B8G8R8A8_UNORM )
+        return false;
+    const int width = min( image->width, raster->width ), height = min( image->height, raster->height );
+    std::vector<RwUInt8> bgra( static_cast<size_t>( raster->width ) * raster->height * 4, 0 );
+    for ( int y = 0; y < height; y++ )
+    {
+        const RwUInt8 *src = image->cpPixels + static_cast<size_t>( y ) * image->stride;
+        RwUInt8 *      dst = bgra.data() + static_cast<size_t>( y ) * raster->width * 4;
+        for ( int x = 0; x < width; x++, dst += 4 )
+        {
+            const RwRGBA *c;
+            if ( image->depth == 32 )
+                c = reinterpret_cast<const RwRGBA *>( src + x * 4 );
+            else if ( image->depth == 8 && image->palette )
+                c = &image->palette[src[x]];
+            else if ( image->depth == 4 && image->palette )
+                c = &image->palette[( src[x / 2] >> ( ( x & 1 ) ? 4 : 0 ) ) & 0xF];
+            else
+                return false;
+            dst[0] = c->blue;
+            dst[1] = c->green;
+            dst[2] = c->red;
+            dst[3] = c->alpha;
+        }
+    }
+    GET_D3D_CONTEXT->UpdateSubresource( d3dRaster->resourse->GetResource(), 0, nullptr, bgra.data(), raster->width * 4, 0 );
+    return true;
+}
+
 bool CRwD3D1XEngine::Standards( int* fnPtrArray, int )
 {
     bool( *pDefstd )( void *, void *, int ) = &mDefStd;
@@ -163,9 +213,11 @@ bool CRwD3D1XEngine::Standards( int* fnPtrArray, int )
     fnPtrArray[4] = (int)(void*&)pRasterCreate;//0x4CCE60;//RasterCreate !!must do!!
     fnPtrArray[5] = (int)(void*&)pRasterDestroy;//0x4CBB00;//RasterDestroy !!must do!!
     fnPtrArray[6] = 0x7FF270;//ImageGetFromRaster not used in menu
-    fnPtrArray[7] = (int)(void*&)pDefstd;//0x8001E0;//RasterSetFromImage not used in menu
+    bool( *pRasterSetFromImage )( void *, void *, int ) = &mRasterSetFromImage;
+    bool( *pImageFindRasterFormat )( void *, void *, int ) = &mImageFindRasterFormat;
+    fnPtrArray[7] = (int)(void*&)pRasterSetFromImage;//0x8001E0;//RasterSetFromImage (textures from images: PNG etc.)
     fnPtrArray[8] = 0x4CBD40;//TextureSetRaster not used in menu
-    fnPtrArray[9] = (int)(void*&)pDefstd;//0x7FFF00;//ImageFindRasterFormat not used in menu
+    fnPtrArray[9] = (int)(void*&)pImageFindRasterFormat;//0x7FFF00;//ImageFindRasterFormat (textures from images)
     fnPtrArray[10] = (int)(void*&)pEndUpdate;//0x7F98D0;//CameraEndUpdate !!must do!!
     fnPtrArray[11] = 0x4CB524;//SetRasterContext not used in menu
     fnPtrArray[12] = 0x4CBD50;//RasterSubRaster not used in menu
