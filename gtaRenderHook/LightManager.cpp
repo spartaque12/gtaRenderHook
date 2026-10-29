@@ -12,6 +12,8 @@
 CLight CLightManager::m_aLights[1024];
 CD3D1XConstantBuffer<LightsCB>* CLightManager::m_pLightBuffer = nullptr;
 int CLightManager::m_nLightCount = 0;
+float CLightManager::m_fCutImportance = 0.0f;
+float CLightManager::m_aKeptImportance[MAX_DYNAMIC_LIGHTS];
 
 void CLightManager::Init()
 {
@@ -80,12 +82,26 @@ void CLightManager::SortByDistance( const RwV3d& from )
     for ( int i = 0; i < m_nLightCount; i++ )
         sorted[i] = m_aLights[order[i]];
     memcpy( m_aLights, sorted, sizeof( CLight ) * m_nLightCount );
+    // No popping at the cut: the kept lights fade from nothing at the score of the first one left out to full strength
+    // at 1.5 times that, so a light that enters or leaves the set is already dark. Done in Update (once per frame) on the
+    // copies sent to the shaders, so a second sort this frame sees the original colours.
+    m_fCutImportance = m_nLightCount > MAX_DYNAMIC_LIGHTS ? importance[order[MAX_DYNAMIC_LIGHTS]] : 0.0f;
+    for ( int i = 0; i < keep; i++ )
+        m_aKeptImportance[i] = importance[order[i]];
 }
 
 void CLightManager::Update()
 {
     for ( auto i = 0; i < MAX_DYNAMIC_LIGHTS; i++ )
-        m_pLightBuffer->data.m_aLights[i] = m_aLights[i];
+    {
+        CLight light = m_aLights[i];
+        if ( m_fCutImportance > 0.0f && i < m_nLightCount )
+        {
+            const float fade = min( max( ( m_aKeptImportance[i] / m_fCutImportance - 1.0f ) * 2.0f, 0.0f ), 1.0f );
+            light.m_vColor = { light.m_vColor.x * fade, light.m_vColor.y * fade, light.m_vColor.z * fade };
+        }
+        m_pLightBuffer->data.m_aLights[i] = light;
+    }
 
     m_pLightBuffer->Update();
     g_pStateMgr->SetLightCount( min( m_nLightCount, MAX_DYNAMIC_LIGHTS ) );

@@ -10,9 +10,9 @@ struct CLight
     RwV3d m_vDir;
     float m_fPadding;
 };
-// nearest lights used per frame; must match aDynamicLights in Deferred.hlsl. With 16, lamps further down a street
-// were dropped as soon as traffic lights, signs and cars nearby took the slots
-constexpr int MAX_DYNAMIC_LIGHTS = 32;
+// lights used per frame (the ones that matter most, CLightManager::SortByDistance); must match aDynamicLights in
+// Deferred.hlsl. With 16 and 32, lamps further down a street were dropped as soon as traffic and signs took the slots
+constexpr int MAX_DYNAMIC_LIGHTS = 64;
 struct LightsCB
 {
     CLight m_aLights[MAX_DYNAMIC_LIGHTS];
@@ -23,6 +23,8 @@ public:
     static CLight m_aLights[1024];
     static int m_nLightCount;
 private:
+    static float m_fCutImportance;                     // importance of the first light left out, 0: none left out
+    static float m_aKeptImportance[MAX_DYNAMIC_LIGHTS];
     static CD3D1XConstantBuffer<LightsCB>* m_pLightBuffer;
 public:
     static void Init();
