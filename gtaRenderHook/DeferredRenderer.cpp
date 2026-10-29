@@ -18,6 +18,7 @@
 #include "RwRenderEngine.h"
 #include "SAIdleHook.h"
 #include "ShadowRenderer.h"
+#include "SpotShadowRenderer.h"
 #include "TemporalAA.h"
 #include "VolumetricLighting.h"
 #include "stdafx.h"
@@ -105,6 +106,7 @@ CDeferredRenderer::CDeferredRenderer()
     gDebugSettings.DebugRenderTargetList.push_back( m_pReflectionRaster );
 
     m_pShadowRenderer = new CShadowRenderer();
+    CSpotShadowRenderer::Init();
     m_pReflRenderer   = new CCubemapReflectionRenderer(
         gDeferredSettings.GetUInt( "CubemapSize" ) );
     m_pTonemapping    = new CHDRTonemapping();
@@ -118,6 +120,7 @@ CDeferredRenderer::~CDeferredRenderer()
     delete m_pDeferredBuffer;
     delete m_pTonemapping;
     delete m_pShadowRenderer;
+    CSpotShadowRenderer::Shutdown();
     delete m_pReflectionPassPS;
     delete m_pAtmospherePassPS;
     delete m_pSunLightingPS;
@@ -206,8 +209,10 @@ void CDeferredRenderer::RenderOutput()
         g_pRwCustomEngine->RenderStateSet( rwRENDERSTATESRCBLEND, rwBLENDONE );
         g_pRwCustomEngine->RenderStateSet( rwRENDERSTATEDESTBLEND, rwBLENDONE );
         g_pDebug->printMsg( "Point light rendering.", 1 );
+        CSpotShadowRenderer::SetShadowBuffer();
         m_pPointLightingPS->Set();
         CFullscreenQuad::Draw();
+        CSpotShadowRenderer::UnsetShadowBuffer();
     } 
 
     g_pRwCustomEngine->RenderStateSet( rwRENDERSTATEVERTEXALPHAENABLE, FALSE );

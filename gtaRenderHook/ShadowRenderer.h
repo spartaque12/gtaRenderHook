@@ -83,6 +83,8 @@ public:
         // where shadows end with SplitLambda, in metres, plus the camera's height above the ground (limited by MaxDrawDistance)
         m_aFields["ShadowDistance"] = new FloatSField( "ShadowDistance", false, false, false, m_sName, 450.0f, 10.0f, 30000.0f, 5.0f );
         // cascades from the third on are re-rendered every this many frames, staggered (1 = every frame)
+        // car headlights cast shadows (CSpotShadowRenderer)
+        m_aFields["HeadlightShadows"] = new ToggleSField( "HeadlightShadows", false, false, false, m_sName, true );
         m_aFields["FarCascadeUpdateInterval"] = new UIntSField( "FarCascadeUpdateInterval", false, false, false, m_sName, 1, 1, 8, 1 );
         Reset();
     }

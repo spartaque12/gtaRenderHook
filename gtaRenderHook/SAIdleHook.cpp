@@ -4,6 +4,7 @@
 #include "SAIdleHook.h"
 #include "DeferredRenderer.h"
 #include "ShadowRenderer.h"
+#include "SpotShadowRenderer.h"
 #include "Renderer.h"
 #include "D3D1XStateManager.h"
 #include "D3D1XRenderBuffersManager.h"
@@ -298,6 +299,9 @@ void CSAIdleHook::RenderInGame()
 
     if ( !CGame::currArea&&m_fShadowDNBalance < 1.0 ) // Render shadows only if we are not inside interiors
         RenderRealTimeShadows( sunDirs[curr_sun_dir] );
+    // car headlights, day and night, indoors too
+    CSpotShadowRenderer::Select();
+    CSpotShadowRenderer::Render();
 
     FrameProfiler::EndZone( FrameProfiler::ZoneShadows );
     shadowTimer.Stop();

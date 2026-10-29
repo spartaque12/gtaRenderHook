@@ -8,6 +8,7 @@
 #include "RwMethods.h"
 #include <game_sa\CCamera.h>
 #include <game_sa\CScene.h>
+#include "SpotShadowRenderer.h"
 
 CLight CLightManager::m_aLights[1024];
 CD3D1XConstantBuffer<LightsCB>* CLightManager::m_pLightBuffer = nullptr;
@@ -95,6 +96,7 @@ void CLightManager::Update()
     for ( auto i = 0; i < MAX_DYNAMIC_LIGHTS; i++ )
     {
         CLight light = m_aLights[i];
+        light.m_fPadding = CSpotShadowRenderer::GetShadowSlot( light ); // its headlight shadow map, 0: none
         if ( m_fCutImportance > 0.0f && i < m_nLightCount )
         {
             const float fade = min( max( ( m_aKeptImportance[i] / m_fCutImportance - 1.0f ) * 2.0f, 0.0f ), 1.0f );
