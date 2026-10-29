@@ -143,61 +143,6 @@ bool CRwD3D1XEngine::Focus( bool )
     return true;
 }
 
-// RenderWare's ImageFindRasterFormat (standard function 9): the raster format for an image loaded from a file (PNG,
-// BMP, DDS read by RwImageRead), used by RwTextureRead and plugins that load loose images (EffectsLoader). Was a stub
-// returning false: RwRasterCreate then got no valid format, and every such texture failed. Always 32-bit BGRA, without
-// mip levels (RasterSetFromImage fills level 0 only).
-static bool mImageFindRasterFormat( void *rasterOut, void *imageIn, int rasterType )
-{
-    auto raster = static_cast<RwRaster *>( rasterOut );
-    auto image  = static_cast<RwImage *>( imageIn );
-    if ( !raster || !image )
-        return false;
-    raster->width   = image->width;
-    raster->height  = image->height;
-    raster->depth   = 32;
-    raster->cType   = static_cast<RwUInt8>( rasterType & rwRASTERTYPEMASK );
-    raster->cFormat = static_cast<RwUInt8>( rwRASTERFORMAT8888 >> 8 );
-    return true;
-}
-
-// RenderWare's RasterSetFromImage (standard function 7): copies an image's pixels into a raster made by the format above
-// (32-bit RGBA or 4/8-bit palettised images into BGRA). Was a stub: such textures stayed empty.
-static bool mRasterSetFromImage( void *rasterIn, void *imageIn, int )
-{
-    auto raster = static_cast<RwRaster *>( rasterIn );
-    auto image  = static_cast<RwImage *>( imageIn );
-    if ( !raster || !image || !image->cpPixels || GetD3D1XRaster( raster )->format != DXGI_FORMAT_B8G8R8A8_UNORM )
-        return false;
-    if ( image->depth != 32 && ( ( image->depth != 8 && image->depth != 4 ) || !image->palette ) )
-        return false;
-    auto dst = RwRasterLock( raster, 0, rwRASTERLOCKWRITE );
-    if ( !dst )
-        return false;
-    const int width = min( raster->width, image->width ), height = min( raster->height, image->height );
-    for ( int y = 0; y < height; y++ )
-    {
-        const RwUInt8 *src = image->cpPixels + y * image->stride;
-        RwUInt8 *      out = dst + y * raster->stride;
-        for ( int x = 0; x < width; x++, out += 4 )
-        {
-            RwRGBA c;
-            if ( image->depth == 32 )
-                c = { src[x * 4], src[x * 4 + 1], src[x * 4 + 2], src[x * 4 + 3] };
-            else if ( image->depth == 8 )
-                c = image->palette[src[x]];
-            else
-                c = image->palette[( x & 1 ) ? ( src[x >> 1] >> 4 ) : ( src[x >> 1] & 0xF )];
-            out[0] = c.blue;
-            out[1] = c.green;
-            out[2] = c.red;
-            out[3] = c.alpha;
-        }
-    }
-    RwRasterUnlock( raster );
-    return true;
-}
-
 bool CRwD3D1XEngine::Standards( int* fnPtrArray, int )
 {
     bool( *pDefstd )( void *, void *, int ) = &mDefStd;
@@ -218,11 +163,9 @@ bool CRwD3D1XEngine::Standards( int* fnPtrArray, int )
     fnPtrArray[4] = (int)(void*&)pRasterCreate;//0x4CCE60;//RasterCreate !!must do!!
     fnPtrArray[5] = (int)(void*&)pRasterDestroy;//0x4CBB00;//RasterDestroy !!must do!!
     fnPtrArray[6] = 0x7FF270;//ImageGetFromRaster not used in menu
-    bool( *pRasterSetFromImage )( void *, void *, int ) = &mRasterSetFromImage;
-    bool( *pImageFindRasterFormat )( void *, void *, int ) = &mImageFindRasterFormat;
-    fnPtrArray[7] = (int)(void*&)pRasterSetFromImage;//0x8001E0;//RasterSetFromImage: images loaded from files
+    fnPtrArray[7] = (int)(void*&)pDefstd;//0x8001E0;//RasterSetFromImage not used in menu
     fnPtrArray[8] = 0x4CBD40;//TextureSetRaster not used in menu
-    fnPtrArray[9] = (int)(void*&)pImageFindRasterFormat;//0x7FFF00;//ImageFindRasterFormat: images loaded from files
+    fnPtrArray[9] = (int)(void*&)pDefstd;//0x7FFF00;//ImageFindRasterFormat not used in menu
     fnPtrArray[10] = (int)(void*&)pEndUpdate;//0x7F98D0;//CameraEndUpdate !!must do!!
     fnPtrArray[11] = 0x4CB524;//SetRasterContext not used in menu
     fnPtrArray[12] = 0x4CBD50;//RasterSubRaster not used in menu
