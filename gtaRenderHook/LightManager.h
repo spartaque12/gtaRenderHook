@@ -12,7 +12,7 @@ struct CLight
 };
 // lights used per frame (the ones that matter most, CLightManager::SortByDistance); must match aDynamicLights in
 // Deferred.hlsl. With 16 and 32, lamps further down a street were dropped as soon as traffic and signs took the slots
-constexpr int MAX_DYNAMIC_LIGHTS = 64;
+constexpr int MAX_DYNAMIC_LIGHTS = 32; // 64 cost far too much fps on busy streets
 struct LightsCB
 {
     CLight m_aLights[MAX_DYNAMIC_LIGHTS];
