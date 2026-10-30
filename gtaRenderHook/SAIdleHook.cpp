@@ -299,9 +299,6 @@ void CSAIdleHook::RenderInGame()
 
     if ( !CGame::currArea&&m_fShadowDNBalance < 1.0 ) // Render shadows only if we are not inside interiors
         RenderRealTimeShadows( sunDirs[curr_sun_dir] );
-    // car headlights, day and night, indoors too
-    CSpotShadowRenderer::Select();
-    CSpotShadowRenderer::Render();
 
     FrameProfiler::EndZone( FrameProfiler::ZoneShadows );
     shadowTimer.Stop();
@@ -317,6 +314,14 @@ void CSAIdleHook::RenderInGame()
     g_pDeferredRenderer->RenderToGBuffer( RenderDeferred );
     FrameProfiler::EndZone( FrameProfiler::ZoneGBuffer );
 
+    // Car headlight shadow maps, day and night, indoors too. Cars add their headlights while they render, so only now.
+    if ( CSpotShadowRenderer::Select() )
+    {
+        RwCameraEndUpdate( Scene.m_pRwCamera );
+        CSpotShadowRenderer::Render();
+        RwCameraBeginUpdate( Scene.m_pRwCamera );
+        CTemporalAA::RestoreCameraMatrices();
+    }
     // Reset renderstates and disable Z-Test
     DefinedState();
     g_pRwCustomEngine->RenderStateSet( rwRENDERSTATEZTESTENABLE, 0 );
@@ -441,6 +446,7 @@ void CSAIdleHook::RenderForwardAfterDeferred()
     RenderEffects();
     renderer->EndDebugEvent();
     DefinedState();
+
     renderer->BeginDebugEvent( L"Grass rendering pass" );
     RenderGrass();
     renderer->EndDebugEvent();

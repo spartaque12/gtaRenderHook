@@ -19,6 +19,8 @@ public:
     static void Init();
     static void Shutdown();
     static void JitterProjMatrix();
+    // after another camera rendered mid-frame: this frame's jittered matrices and motion camera again
+    static void RestoreCameraMatrices();
     static void SaveViewMatrix();
     static void Render( RwRaster *input, RwRaster *output, RwRaster *gBuff1,
                         RwRaster *gBuff2 );

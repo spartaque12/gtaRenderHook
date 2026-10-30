@@ -687,7 +687,10 @@ void CD3D1XStateManager::SetRenderTargets( unsigned int count, ID3D11RenderTarge
 {
     if ( ppRenderTargets == nullptr )
     {
-        for ( UINT i = 0; i < count; i++ )
+        // no colour targets at all (a depth-only camera): every slot, not just count. A target set earlier but not
+        // flushed yet (the main framebuffer after the G-buffer pass) was kept and bound with a depth buffer of
+        // another size, which D3D11 rejects, so nothing was drawn.
+        for ( UINT i = 0; i < 8; i++ )
         {
             if ( m_pCurrentRenderTargets[i] != nullptr )
             {

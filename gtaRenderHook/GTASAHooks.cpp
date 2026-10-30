@@ -15,6 +15,7 @@
 #include <game_sa\CVehicleModelInfo.h>
 #include <game_sa\CModelInfo.h>
 #include "LightManager.h"
+#include "SpotShadowRenderer.h"
 #include "FullscreenQuad.h"
 #include "HudLayer.h"
 #include "FrameGenBridge.h"
@@ -240,4 +241,5 @@ void __fastcall  CGTASAHooks::AddSpotLight( CVehicle* vehicle, void *Unknown, in
     light.m_vColor = { 1.0, 1.0, 1.0 };
     light.m_nLightType = 1;
     CLightManager::AddLight( light );
+    CSpotShadowRenderer::NoteVehicleHeadlights( vehicle );
 }

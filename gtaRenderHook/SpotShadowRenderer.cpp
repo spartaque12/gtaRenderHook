@@ -16,12 +16,17 @@
 #include <game_sa\CCamera.h>
 #include <game_sa\CEntity.h>
 #include <game_sa\CModelInfo.h>
+#include <game_sa\CPools.h>
+#include <game_sa\CAutomobile.h>
+#include "GTASAHooks.h"
 
 CSpotShadowRenderer::Caster CSpotShadowRenderer::m_aCasters[SPOT_SHADOW_COUNT]{};
 float CSpotShadowRenderer::m_aStrength[SPOT_SHADOW_COUNT]{};
 RwCamera* CSpotShadowRenderer::m_pCamera = nullptr;
 CD3D1XConstantBuffer<CBSpotShadows>* CSpotShadowRenderer::m_pCB = nullptr;
 bool CSpotShadowRenderer::m_bRendered = false;
+CVehicle* CSpotShadowRenderer::m_aLitVehicles[256]{};
+int CSpotShadowRenderer::m_nLitVehicles = 0;
 
 namespace
 {
@@ -91,8 +96,9 @@ void CSpotShadowRenderer::Shutdown()
     }
 }
 
-void CSpotShadowRenderer::Select()
+bool CSpotShadowRenderer::Select()
 {
+    AddOffscreenHeadlights();
     m_bRendered = false;
     Caster previous[SPOT_SHADOW_COUNT];
     memcpy( previous, m_aCasters, sizeof( previous ) );
@@ -102,7 +108,7 @@ void CSpotShadowRenderer::Select()
     {
         for ( auto &s : m_aStrength )
             s = 0.0f;
-        return;
+        return false;
     }
 
     const RwV3d camPos = TheCamera.GetPosition().ToRwV3d();
@@ -202,6 +208,54 @@ void CSpotShadowRenderer::Select()
     }
     for ( int s = 0; s < SPOT_SHADOW_COUNT; s++ )
         m_aStrength[s] = m_aCasters[s].active ? min( m_aStrength[s] + 0.15f, 1.0f ) : 0.0f;
+    return chosenCount > 0;
+}
+
+void CSpotShadowRenderer::NoteVehicleHeadlights( CVehicle* vehicle )
+{
+    if ( m_nLitVehicles < 256 && ( m_nLitVehicles == 0 || m_aLitVehicles[m_nLitVehicles - 1] != vehicle ) )
+        m_aLitVehicles[m_nLitVehicles++] = vehicle;
+}
+
+void CSpotShadowRenderer::AddOffscreenHeadlights()
+{
+    const int lit = m_nLitVehicles;
+    const RwV3d camPos = TheCamera.GetPosition().ToRwV3d();
+    auto pool = CPools::ms_pVehiclePool;
+    for ( int i = 0; pool && i < pool->m_nSize; i++ )
+    {
+        CVehicle* vehicle = pool->GetAt( i );
+        if ( vehicle == nullptr )
+            continue;
+        if ( vehicle->m_matrix == nullptr || vehicle->m_pRwObject == nullptr || vehicle->m_fHealth <= 0.0f )
+            continue;
+        if ( vehicle->m_nOverrideLights == 1 /* FORCE_CAR_LIGHTS_OFF */ ||
+             ( !vehicle->m_nVehicleFlags.bLightsOn && vehicle->m_nOverrideLights != 2 /* FORCE_CAR_LIGHTS_ON */ ) )
+            continue;
+        const bool automobile = vehicle->m_nVehicleClass == VEHICLE_AUTOMOBILE;
+        if ( !automobile && vehicle->m_nVehicleClass != VEHICLE_BIKE )
+            continue;
+        if ( Distance( vehicle->GetPosition().ToRwV3d(), camPos ) > kMaxDistance )
+            continue;
+        bool drawn = false;
+        for ( int k = 0; k < lit && !drawn; k++ )
+            drawn = m_aLitVehicles[k] == vehicle;
+        if ( drawn )
+            continue;
+        CMatrix* matrix = reinterpret_cast<CMatrix*>( vehicle->m_matrix );
+        if ( automobile )
+        {
+            // broken headlights stay dark
+            auto& damage = static_cast<CAutomobile*>( vehicle )->m_damageManager;
+            if ( damage.GetLightStatus( LIGHT_FRONT_RIGHT ) == 0 )
+                CGTASAHooks::AddSpotLight( vehicle, nullptr, 0, matrix, true );
+            if ( damage.GetLightStatus( LIGHT_FRONT_LEFT ) == 0 )
+                CGTASAHooks::AddSpotLight( vehicle, nullptr, 0, matrix, false );
+        }
+        else
+            CGTASAHooks::AddSpotLight( vehicle, nullptr, 0, matrix, true );
+    }
+    m_nLitVehicles = 0;
 }
 
 void CSpotShadowRenderer::Render()
@@ -218,7 +272,19 @@ void CSpotShadowRenderer::Render()
     m_uiDeferredStage = 2;
     RwRGBA clearColour{ 0, 0, 0, 0 };
     RwCameraClear( m_pCamera, &clearColour, rwCAMERACLEARZ );
-
+    // After the G-buffer pass (fading entities, weapons) depth writes may be off: a plain depth pass. DefinedState
+    // follows this pass in the frame, so nothing is restored.
+    g_pRwCustomEngine->RenderStateSet( rwRENDERSTATEZTESTENABLE, 1 );
+    g_pRwCustomEngine->RenderStateSet( rwRENDERSTATEZWRITEENABLE, 1 );
+    g_pRwCustomEngine->RenderStateSet( rwRENDERSTATEVERTEXALPHAENABLE, 0 );
+    g_pRwCustomEngine->RenderStateSet( rwRENDERSTATECULLMODE, rwCULLMODECULLNONE );
+    g_pStateMgr->SetDepthEnable( true );
+    g_pStateMgr->SetZWriteEnable( true );
+    g_pStateMgr->SetDepthFunc( D3D11_COMPARISON_LESS_EQUAL );
+    g_pStateMgr->SetStencilEnable( false );
+    g_pStateMgr->SetDepthClipEnable( true );
+    g_pStateMgr->SetAlphaTestEnable( true );
+    g_pStateMgr->SetAlphaTestRef( 0.5f );
     for ( int s = 0; s < SPOT_SHADOW_COUNT; s++ )
     {
         const Caster &caster = m_aCasters[s];

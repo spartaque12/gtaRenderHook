@@ -23,14 +23,21 @@ class CSpotShadowRenderer
 public:
     static void Init();
     static void Shutdown();
-    // picks the cars from this frame's lights (call after PreRender)
-    static void Select();
+    // picks the cars from this frame's lights (call once the cars have rendered: they add their headlights then)
+    static bool Select(); // true: there's a map to render
     static void Render();
     // marks a light that belongs to a chosen car with its map; 0 for any other light
     static float GetShadowSlot( const struct CLight &light );
     static void SetShadowBuffer();
     static void UnsetShadowBuffer();
+    // a car added its headlights this frame (it was drawn)
+    static void NoteVehicleHeadlights( class CVehicle* vehicle );
 private:
+    // Cars only add their headlights while they are drawn, so a car off screen lit nothing (and cast no shadow) even
+    // when its beam reached what's on screen: the nearby ones with their lights on get them added here.
+    static void AddOffscreenHeadlights();
+    static CVehicle* m_aLitVehicles[256];
+    static int       m_nLitVehicles;
     struct Caster
     {
         RwV3d pos;
