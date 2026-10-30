@@ -117,6 +117,53 @@ float SpotLightIntensity(float cosA, float umbraAngle, float penumbraAngle)
     return smoothstep(0, 1, t);
 }
 
+// Shadows of car headlights: RenderHook renders a depth map for the nearest cars with headlights on (both headlights of
+// a car share one, from between them looking down the beam); fPadding of such a light holds its map + 1.
+#ifndef HEADLIGHT_SHADOWS
+#define HEADLIGHT_SHADOWS 1
+#endif
+#ifndef HEADLIGHT_SHADOW_SOFTNESS
+#define HEADLIGHT_SHADOW_SOFTNESS 1.5f   // filter radius in shadow map texels
+#endif
+#define SPOT_SHADOW_COUNT 2
+Texture2D txSpotShadow : register(t8);
+cbuffer SpotShadowBuffer : register(b11)
+{
+    row_major matrix mSpotViewProj[SPOT_SHADOW_COUNT];
+    float4 vSpotShadowStrength;
+};
+
+// 1 = lit, 0 = in shadow
+float SpotShadow(float3 worldPos, float3 normal, float3 lightPos, uint slot)
+{
+    const float3 toLight = lightPos - worldPos;
+    const float dist = length(toLight);
+    // off the surface toward the light, more further away (the map's texels get bigger)
+    const float3 p = worldPos + normal * (0.02f + 0.006f * dist) + toLight / max(dist, 1e-3f) * 0.02f;
+    const float4 clip = mul(float4(p, 1.0f), mSpotViewProj[slot]);
+    if (clip.w <= 1e-3f)
+        return 1.0f;
+    const float3 ndc = clip.xyz / clip.w;
+    if (any(abs(ndc.xy) >= 1.0f) || ndc.z <= 0.0f || ndc.z >= 1.0f)
+        return 1.0f;
+    const float2 uv = float2((0.5f * ndc.x + 0.5f + slot) / SPOT_SHADOW_COUNT, 0.5f - 0.5f * ndc.y);
+    uint w, h;
+    txSpotShadow.GetDimensions(w, h);
+    const float2 texel = HEADLIGHT_SHADOW_SOFTNESS / float2(w, h);
+    // keep the taps inside this car's half of the texture
+    const float2 lo = float2((float)slot / SPOT_SHADOW_COUNT, 0) + texel;
+    const float2 hi = float2((float)(slot + 1) / SPOT_SHADOW_COUNT, 1) - texel;
+    float lit = 0;
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    [unroll]
+    for (int x = -1; x <= 1; x++)
+        lit += txSpotShadow.SampleCmpLevelZero(samShadow, clamp(uv + float2(x, y) * texel, lo, hi), ndc.z - 1e-5f);
+    // fade out at the map's edge (the beam's edge is dark anyway)
+    const float edge = saturate((1.0f - max(abs(ndc.x), abs(ndc.y))) * 10.0f);
+    return lerp(1.0f, lit / 9.0f, edge * vSpotShadowStrength[slot]);
+}
+
 // point and spot light pass
 float4 PointLightingPS(PS_QUAD_IN i) : SV_Target
 {
@@ -166,6 +213,11 @@ float4 PointLightingPS(PS_QUAD_IN i) : SV_Target
 		{
             float fSpot = SpotLightIntensity(max(dot(-LightDir, aDynamicLights[i].vDir), 0.0f), PI / 3.0f, PI / 6.0f); //pow(, 4.0f);
             Attenuation *= fSpot;
+#if HEADLIGHT_SHADOWS == 1
+            if (aDynamicLights[i].fPadding > 0.5f && Attenuation > 0.002f)
+                Attenuation *= SpotShadow(WorldPos, Normals, aDynamicLights[i].vPosition.xyz,
+                                          min((uint)(aDynamicLights[i].fPadding - 0.5f), SPOT_SHADOW_COUNT - 1));
+#endif
         }
 			
         FinalDiffuseTerm += DiffuseTerm * Attenuation * LightColor;
