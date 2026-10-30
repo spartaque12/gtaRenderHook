@@ -5,6 +5,7 @@
 #include "DeferredRenderer.h"
 #include "ShadowRenderer.h"
 #include "SpotShadowRenderer.h"
+#include "RTBridge.h"
 #include "Renderer.h"
 #include "D3D1XStateManager.h"
 #include "D3D1XRenderBuffersManager.h"
@@ -312,8 +313,11 @@ void CSAIdleHook::RenderInGame()
     g_pCustomBuildingDNPipe->ResetAlphaList();
     // Render scene to geometry buffers.
     FrameProfiler::BeginZone( FrameProfiler::ZoneGBuffer );
+    CRTBridge::BeginFrame();
     g_pDeferredRenderer->RenderToGBuffer( RenderDeferred );
     FrameProfiler::EndZone( FrameProfiler::ZoneGBuffer );
+    // to the ray-traced AO helper (CRTBridge), before anything changes the camera's matrices
+    CRTBridge::EndGBuffer( g_pDeferredRenderer->GetNormalDepthRaster() );
 
     // Car headlight shadow maps, day and night, indoors too. Cars add their headlights while they render, so only now.
     if ( CSpotShadowRenderer::Select() )

@@ -1,0 +1,4 @@
+bin/
+obj/
+src/TraceAO.h
+src/BlurAO.h

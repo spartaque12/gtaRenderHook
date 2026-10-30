@@ -1,6 +1,7 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check it.
 // PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include "stdafx.h"
+#include "RTBridge.h"
 #include "FrameProfiler.h"
 #include "RwD3D1XEngine.h"
 #include "D3D1XStateManager.h"
@@ -958,6 +959,7 @@ bool CRwD3D1XEngine::RasterShowRaster( RwRaster *raster, UINT flags )
 
 void destroyNotify( RwResEntry * resEntry )
 {
+    CRTBridge::OnResEntryDestroyed( resEntry );
     RxD3D9ResEntryHeader resEntryHeader = static_cast<RxInstanceData*>( resEntry )->header;
     if ( resEntryHeader.indexBuffer )
     {
@@ -1079,6 +1081,8 @@ bool CRwD3D1XEngine::AtomicAllInOneNode( RxPipelineNode *self, const RxPipelineN
         return true;
     {
         auto ltm = RwFrameGetLTM( static_cast<RwFrame*>( atomic->object.object.parent ) );
+        if ( m_uiDeferredStage == 1 )
+            CRTBridge::AddInstance( entryData, geom, ltm );
         g_pRenderBuffersMgr->UpdateWorldMatrix( ltm );
         g_pRenderBuffersMgr->SetMatrixBuffer();
         if ( callbacks->render )

@@ -19,6 +19,7 @@
 #include "SAIdleHook.h"
 #include "ShadowRenderer.h"
 #include "SpotShadowRenderer.h"
+#include "RTBridge.h"
 #include "TemporalAA.h"
 #include "VolumetricLighting.h"
 #include "stdafx.h"
@@ -121,6 +122,7 @@ CDeferredRenderer::~CDeferredRenderer()
     delete m_pTonemapping;
     delete m_pShadowRenderer;
     CSpotShadowRenderer::Shutdown();
+    CRTBridge::Shutdown();
     delete m_pReflectionPassPS;
     delete m_pAtmospherePassPS;
     delete m_pSunLightingPS;
@@ -236,6 +238,7 @@ void CDeferredRenderer::RenderOutput()
     g_pStateMgr->SetRaster( m_pFinalRasters[1 - m_uiCurrentFinalRaster], 5 );
     g_pStateMgr->SetRaster( m_pReflectionRaster, 6 );
     g_pStateMgr->SetRaster( CAmbientOcclusion::GetAORaster(), 7 );
+    CRTBridge::BindAO( 7 ); // ray-traced AO in its place when the helper made it in time
 
     m_pFinalPassPS->Set();
     CFullscreenQuad::Draw();

@@ -168,6 +168,10 @@ public:
         // NVIDIA Reflex on RenderHook's device (CNvReflex); Boost keeps GPU clocks up
         m_aFields["NvReflex"] = new ToggleSField( "NvReflex", false, false, false, m_sName, false );
         m_aFields["NvReflexBoost"] = new ToggleSField( "NvReflexBoost", false, false, false, m_sName, false );
+        // ray-traced AO through RHRayTrace\RHRT64.exe (CRTBridge, DXR): replaces RenderHook's AO when ready in time
+        m_aFields["RayTracedAO"] = new ToggleSField( "RayTracedAO", false, false, false, m_sName, false );
+        m_aFields["RayTracedAORadius"] = new FloatSField( "RayTracedAORadius", false, false, false, m_sName, 1.5f, 0.1f, 10.0f, 0.1f );
+        m_aFields["RayTracedAORays"] = new IntSField( "RayTracedAORays", false, false, false, m_sName, 4, 1, 32 );
         m_aFields["DebugLevel"] = new IntSField( "DebugLevel", true, false, false, m_sName, 0, 0, 2 );
         Reset();
     }
