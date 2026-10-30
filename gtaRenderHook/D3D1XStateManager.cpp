@@ -208,6 +208,16 @@ void CD3D1XStateManager::SetFillMode( D3D11_FILL_MODE mode )
     }
 }
 
+void CD3D1XStateManager::SetDepthBias( INT bias, float slopeScaled )
+{
+    if ( m_rasterDesc.DepthBias != bias || m_rasterDesc.SlopeScaledDepthBias != slopeScaled )
+    {
+        m_rasterDesc.DepthBias = bias;
+        m_rasterDesc.SlopeScaledDepthBias = slopeScaled;
+        m_bRasterDescReqUpdate = true;
+    }
+}
+
 void CD3D1XStateManager::SetDepthClipEnable( bool enable )
 {
     if ( ( m_rasterDesc.DepthClipEnable != FALSE ) != enable )
@@ -951,7 +961,9 @@ bool CD3D1XStateManager::IsRasterDescRequiresUpdate()
 {
     return	m_rasterDescOld.CullMode != m_rasterDesc.CullMode ||
         m_rasterDescOld.FillMode != m_rasterDesc.FillMode ||
-        m_rasterDescOld.DepthClipEnable != m_rasterDesc.DepthClipEnable;
+        m_rasterDescOld.DepthClipEnable != m_rasterDesc.DepthClipEnable ||
+        m_rasterDescOld.DepthBias != m_rasterDesc.DepthBias ||
+        m_rasterDescOld.SlopeScaledDepthBias != m_rasterDesc.SlopeScaledDepthBias;
 }
 bool CD3D1XStateManager::IsBlendDescRequiresUpdate()
 {

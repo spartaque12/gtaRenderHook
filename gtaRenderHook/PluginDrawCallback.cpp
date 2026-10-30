@@ -12,6 +12,19 @@ void __cdecl RHSetBuildingDrawCallback( RHBuildingDrawCallback callback )
     g_buildingDrawCallback = callback;
 }
 
+static RHSceneDrawCallback g_sceneDrawCallback = nullptr;
+
+void __cdecl RHSetSceneDrawCallback( RHSceneDrawCallback callback )
+{
+    g_sceneDrawCallback = callback;
+}
+
+void NotifySceneDraw( int pass )
+{
+    if ( g_sceneDrawCallback )
+        g_sceneDrawCallback( pass );
+}
+
 int CurrentBuildingDrawPass()
 {
     switch ( m_uiDeferredStage )

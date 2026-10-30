@@ -84,3 +84,16 @@ typedef unsigned int( __cdecl *RHBuildingDrawCallback )( const RHBuildingDraw *d
     nullptr. Constant buffers it binds stay bound for that draw (RenderHook itself uses slots b0-b11).
 */
 RENDERHOOK_API void __cdecl RHSetBuildingDrawCallback( RHBuildingDrawCallback callback );
+
+/*!
+    Called once per frame at the end of the G-buffer pass (pass = RH_PASS_GBUFFER) with the main camera's view and
+    projection set. A plugin can draw its own geometry there with RwIm3D: it goes into the G-buffer like the game's
+    (a triangle's own face normal, texture alpha below 0.3 cut out) and is lit, shadowed and anti-aliased with the
+    rest of the scene. RenderWare render states it changes are reset afterwards.
+*/
+typedef void( __cdecl *RHSceneDrawCallback )( int pass );
+
+/*!
+    Registers the scene draw callback, or removes it with nullptr.
+*/
+RENDERHOOK_API void __cdecl RHSetSceneDrawCallback( RHSceneDrawCallback callback );

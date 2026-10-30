@@ -27,6 +27,7 @@
 #include <game_sa\CFont.h>
 #include "HudLayer.h"
 #include "FrameGenBridge.h"
+#include "PluginDrawCallback.h"
 #include "FrameGenShared.h"
 #include "NvReflex.h"
 #include <game_sa\CWorld.h>
@@ -431,6 +432,20 @@ void CSAIdleHook::RenderForwardAfterDeferred()
     DefinedState();
     renderer->EndDebugEvent();
 
+    // Mods that draw after the game's roads (SleekBlood: blood pools, bullet holes, splatter) hook
+    // CRenderer::RenderRoads, which RenderHook replaces with its own. When it's hooked, call it here, over the lit
+    // scene, with the game's visible list emptied: the roads themselves are already drawn.
+    if ( *reinterpret_cast<const unsigned char*>( 0x553A10 ) == 0xE9 )
+    {
+        renderer->BeginDebugEvent( L"Hooked CRenderer::RenderRoads" );
+        const UINT visible = CRendererRH::ms_nNoOfVisibleEntities;
+        CRendererRH::ms_nNoOfVisibleEntities = 0;
+        ( (void( __cdecl * )())0x553A10 )();
+        CRendererRH::ms_nNoOfVisibleEntities = visible;
+        DefinedState();
+        renderer->EndDebugEvent();
+    }
+
     renderer->BeginDebugEvent( L"Alpha-blended objects rendering pass" );
     g_pDeferredRenderer->m_pShadowRenderer->SetShadowBuffer();
     g_pDeferredRenderer->m_pReflRenderer->SetCubemap();
@@ -446,6 +461,24 @@ void CSAIdleHook::RenderForwardAfterDeferred()
     RenderEffects();
     renderer->EndDebugEvent();
     DefinedState();
+
+    // Mods that draw from a hook on Idle's call of RenderEffects (BulletWorks: bullet holes), which RenderHook
+    // replaces with its own. When that call is redirected, call it here with the game's RenderEffects stubbed out
+    // (the effects are already drawn above), so only the mods' code runs.
+    constexpr INT_PTR renderEffectsCall = 0x53EAD3, renderEffects = 0x53E170;
+    const auto *call = reinterpret_cast<const unsigned char *>( renderEffectsCall );
+    const INT_PTR callTarget = renderEffectsCall + 5 + *reinterpret_cast<const INT32 *>( call + 1 );
+    if ( call[0] == 0xE8 && callTarget != renderEffects )
+    {
+        renderer->BeginDebugEvent( L"Hooked RenderEffects" );
+        unsigned char original = *reinterpret_cast<unsigned char *>( renderEffects ), ret = 0xC3;
+        ::Patch( reinterpret_cast<void *>( renderEffects ), &ret, 1 );
+        ( (void( __cdecl * )())callTarget )();
+        ::Patch( reinterpret_cast<void *>( renderEffects ), &original, 1 );
+        g_pStateMgr->SetDepthBias( 0, 0.0f );
+        DefinedState();
+        renderer->EndDebugEvent();
+    }
 
     renderer->BeginDebugEvent( L"Grass rendering pass" );
     RenderGrass();
@@ -470,6 +503,12 @@ void CSAIdleHook::RenderDeferred()
     BreakManager_c__Render( g_breakMan, 1 );
     // CRenderer::RenderFadingInUnderwaterEntities
     CVisibilityPluginsRH::RenderWeaponPedsNoMuzzleFlash();
+    // plugins' own geometry (RHSetSceneDrawCallback), only in the main G-buffer pass
+    if ( m_uiDeferredStage == 1 )
+    {
+        NotifySceneDraw( RH_PASS_GBUFFER );
+        DefinedState();
+    }
     //CRenderer::RenderTOBJs();
     //CWaterLevel::RenderSeaBed();
 }

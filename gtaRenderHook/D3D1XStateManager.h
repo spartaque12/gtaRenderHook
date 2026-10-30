@@ -250,6 +250,10 @@ public:
     */
     void SetViewport( const D3D11_VIEWPORT &vp );
     /*!
+        Changes depth bias (D3D11 units) and slope-scaled depth bias.
+    */
+    void SetDepthBias( INT bias, float slopeScaled );
+    /*!
         Flushes all state changes.
     */
     void FlushStates();

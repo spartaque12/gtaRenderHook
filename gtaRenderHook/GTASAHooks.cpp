@@ -42,6 +42,7 @@ void CGTASAHooks::Patch()
     CStreamingRH::Patch();
 
     SetPointer( 0x4C9AB5, RwD3D11RasterDestructor );
+    RedirectJump( 0x7FC2D0, D3D9SetRenderState );
 
     RedirectJump( 0x730830, InitD3DCacheSystem );
     RedirectJump( 0x730A00, ShutdownD3DCacheSystem );
@@ -147,6 +148,26 @@ int CGTASAHooks::GetBestRefreshRate( int width, int height, int depth )
 void* CGTASAHooks::RwD3D11RasterDestructor( void* raster, RwInt32 offset, RwInt32 size )
 {
     return raster;
+}
+
+void CGTASAHooks::D3D9SetRenderState( RwUInt32 state, RwUInt32 value )
+{
+    constexpr RwUInt32 D3DRS_SLOPESCALEDEPTHBIAS = 175, D3DRS_DEPTHBIAS = 195;
+    if ( state >= 210 ) // D3DRS_BLENDOPALPHA + 1
+        return;
+    // RwD3D9GetRenderState reads this cache: { value, changed } per state
+    auto cache = reinterpret_cast<RwUInt32 *>( 0xC991D0 );
+    cache[state * 2] = value;
+    static float bias = 0.0f, slope = 0.0f;
+    if ( state == D3DRS_DEPTHBIAS )
+        memcpy( &bias, &value, sizeof( float ) );
+    else if ( state == D3DRS_SLOPESCALEDEPTHBIAS )
+        memcpy( &slope, &value, sizeof( float ) );
+    else
+        return;
+    // D3D9 gives the bias in depth units, D3D11 in units of the 24-bit depth buffer
+    if ( g_pStateMgr )
+        g_pStateMgr->SetDepthBias( static_cast<INT>( bias * 16777216.0f ), slope );
 }
 
 void CGTASAHooks::RenderRadar( RwPrimitiveType prim, RwIm2DVertex * vert, int count )

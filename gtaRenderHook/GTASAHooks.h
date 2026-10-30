@@ -31,6 +31,12 @@ public:
     static void* RwD3D11RasterDestructor( void* raster, RwInt32 offset, RwInt32 size );
 
     /*
+        RwD3D9SetRenderState, which mods call directly: keeps the game's state cache (RwD3D9GetRenderState) and
+        passes depth bias on (BulletWorks' bullet holes)
+    */
+    static void D3D9SetRenderState( RwUInt32 state, RwUInt32 value );
+
+    /*
         Replaces original radar alphatest mask with stencil mask
     */
     static void RenderRadar( RwPrimitiveType prim, RwIm2DVertex * vert, int count );
